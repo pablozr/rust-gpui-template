@@ -63,7 +63,7 @@ foreach ($file in $files) {
         $updated = $updated.Replace($pair[0], $pair[1])
     }
     if ($file -eq 'README.md') {
-        $updated = [regex]::Replace($updated, '(?s)<!-- template:start -->.*?<!-- template:end -->\r?\n(\r?\n)?', '')
+        $updated = [regex]::Replace($updated, '(?s)<!-- template:start -->.*?<!-- template:end -->\r?\n(\r?\n)?', ("# " + $DisplayName.Replace('$', '$$') + "`n`n"))
     }
     if ($updated -ne $text) {
         if ($DryRun) {
