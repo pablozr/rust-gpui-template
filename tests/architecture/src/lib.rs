@@ -34,7 +34,7 @@ pub const LAYERS: &[Layer] = &[
         package: "myapp-domain",
         workspace: &[],
         external: Some(&["thiserror"]),
-        external_dev: &[],
+        external_dev: &["proptest"],
         gpui_allowed: false,
         io_allowed: false,
         is_adapter: false,

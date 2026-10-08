@@ -248,3 +248,173 @@ mod tests {
         assert_eq!(remaining, [first, third]);
     }
 }
+
+#[cfg(test)]
+mod properties {
+    use super::*;
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
+
+    type Model = Vec<(ItemId, String, bool)>;
+
+    #[derive(Debug, Clone)]
+    enum Operation {
+        Add(String),
+        Toggle(Index),
+        Remove(Index),
+        ToggleUnknown,
+        RemoveUnknown,
+    }
+
+    fn visible_char() -> impl Strategy<Value = char> {
+        any::<char>().prop_filter("not whitespace", |c| !c.is_whitespace())
+    }
+
+    /// A title body without whitespace at its edges, one to `MAX_TITLE_CHARS + 10` characters.
+    fn core_text() -> impl Strategy<Value = String> {
+        let middle = vec(
+            prop_oneof![visible_char(), Just(' ')],
+            0..=MAX_TITLE_CHARS + 8,
+        );
+        prop_oneof![
+            visible_char().prop_map(String::from),
+            (visible_char(), middle, visible_char()).prop_map(|(first, middle, last)| {
+                let mut text = String::from(first);
+                text.extend(middle);
+                text.push(last);
+                text
+            }),
+        ]
+    }
+
+    fn padding() -> impl Strategy<Value = String> {
+        let whitespace = prop::sample::select(vec![' ', '\t', '\n', '\u{a0}', '\u{3000}']);
+        vec(whitespace, 0..3).prop_map(|chars| chars.into_iter().collect())
+    }
+
+    fn operation() -> impl Strategy<Value = Operation> {
+        prop_oneof![
+            3 => "[a-z]{1,8}".prop_map(Operation::Add),
+            2 => any::<Index>().prop_map(Operation::Toggle),
+            2 => any::<Index>().prop_map(Operation::Remove),
+            1 => Just(Operation::ToggleUnknown),
+            1 => Just(Operation::RemoveUnknown),
+        ]
+    }
+
+    fn apply(
+        list: &mut ItemList,
+        model: &mut Model,
+        issued: &mut HashSet<ItemId>,
+        operation: Operation,
+    ) -> Result<(), TestCaseError> {
+        match operation {
+            Operation::Add(text) => {
+                let id = list.add(ItemTitle::parse(&text).unwrap()).unwrap();
+                prop_assert!(issued.insert(id), "id {id} was issued twice");
+                model.push((id, text, false));
+            }
+            Operation::Toggle(index) if !model.is_empty() => {
+                let at = index.index(model.len());
+                prop_assert_eq!(list.toggle(model[at].0), Ok(()));
+                model[at].2 = !model[at].2;
+            }
+            Operation::Remove(index) if !model.is_empty() => {
+                let at = index.index(model.len());
+                let removed = list.remove(model[at].0).unwrap();
+                let (id, text, done) = model.remove(at);
+                prop_assert_eq!(
+                    removed,
+                    Item::new(id, ItemTitle::parse(&text).unwrap(), done)
+                );
+            }
+            Operation::Toggle(_) | Operation::Remove(_) => {}
+            Operation::ToggleUnknown => {
+                let unknown = ItemId::new(u64::MAX);
+                let before = list.clone();
+                prop_assert_eq!(list.toggle(unknown), Err(DomainError::UnknownItem(unknown)));
+                prop_assert_eq!(&*list, &before);
+            }
+            Operation::RemoveUnknown => {
+                let unknown = ItemId::new(u64::MAX);
+                let before = list.clone();
+                prop_assert_eq!(list.remove(unknown), Err(DomainError::UnknownItem(unknown)));
+                prop_assert_eq!(&*list, &before);
+            }
+        }
+        Ok(())
+    }
+
+    fn assert_matches_model(list: &ItemList, model: &Model) -> Result<(), TestCaseError> {
+        let actual: Model = list
+            .items()
+            .iter()
+            .map(|item| (item.id(), item.title().as_str().to_owned(), item.is_done()))
+            .collect();
+        prop_assert_eq!(&actual, model);
+        for (at, (id, _, _)) in model.iter().enumerate() {
+            prop_assert_eq!(list.position(*id), Some(at));
+        }
+        Ok(())
+    }
+
+    proptest! {
+        #[test]
+        fn title_keeps_the_core_and_enforces_the_limit(
+            before in padding(),
+            core in core_text(),
+            after in padding(),
+        ) {
+            let only_padding = format!("{before}{after}");
+            let padded = format!("{before}{core}{after}");
+            prop_assert_eq!(ItemTitle::parse(&only_padding), Err(DomainError::EmptyTitle));
+            if core.chars().count() <= MAX_TITLE_CHARS {
+                let title = ItemTitle::parse(&padded).unwrap();
+                prop_assert_eq!(title.as_str(), core.as_str());
+                prop_assert_eq!(ItemTitle::parse(title.as_str()), Ok(title));
+            } else {
+                prop_assert_eq!(ItemTitle::parse(&padded), Err(DomainError::TitleTooLong));
+            }
+        }
+
+        #[test]
+        fn item_list_behaves_like_a_model(operations in vec(operation(), 0..40)) {
+            let mut list = ItemList::default();
+            let mut model = Model::new();
+            let mut issued = HashSet::new();
+            for operation in operations {
+                apply(&mut list, &mut model, &mut issued, operation)?;
+                assert_matches_model(&list, &model)?;
+            }
+        }
+
+        #[test]
+        fn restore_rejects_duplicates_and_keeps_order(
+            entries in vec((0u64..16, any::<bool>()), 0..10),
+        ) {
+            let title = ItemTitle::parse("item").unwrap();
+            let items: Vec<Item> = entries
+                .iter()
+                .map(|&(id, done)| Item::new(ItemId::new(id), title.clone(), done))
+                .collect();
+            let ids: HashSet<u64> = entries.iter().map(|&(id, _)| id).collect();
+            match ItemList::from_items(items.clone()) {
+                Err(error) => {
+                    prop_assert!(ids.len() < entries.len());
+                    let RestoreError::DuplicateItem(id) = error else {
+                        return Err(TestCaseError::fail(format!("unexpected {error:?}")));
+                    };
+                    prop_assert!(entries.iter().filter(|&&(raw, _)| raw == id.get()).count() >= 2);
+                }
+                Ok(mut list) => {
+                    prop_assert_eq!(ids.len(), entries.len());
+                    prop_assert_eq!(list.items(), items.as_slice());
+                    let new = list.add(title).unwrap();
+                    prop_assert!(!ids.contains(&new.get()));
+                    prop_assert!(ids.iter().all(|&id| new.get() > id));
+                }
+            }
+        }
+    }
+}

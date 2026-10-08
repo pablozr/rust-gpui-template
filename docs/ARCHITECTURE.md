@@ -4,7 +4,7 @@
 
 | Crate | Depends on (workspace) | External crates |
 |---|---|---|
-| `myapp-domain` | none | `thiserror` |
+| `myapp-domain` | none | `thiserror`; `proptest` as dev-dependency only |
 | `myapp-core` | `myapp-domain` | `thiserror`, `tracing` |
 | `myapp-storage` | `myapp-core` | `serde`, `serde_json`; `tempfile` as dev-dependency only |
 | `myapp-ui` | none | `gpui` |

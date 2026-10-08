@@ -14,6 +14,7 @@ Propose options and a recommendation, then wait, before: adding or replacing a d
 
 ## Correctness
 - Make wrong use impossible to write instead of documenting it: a newtype per distinct id or unit (`ItemId`, not `u64`), an enum instead of linked `bool`/`Option` fields, a state enum instead of flags. Typestate only when calling the wrong method must not compile.
+- Domain rules get `proptest` properties next to the examples. Build the expected result from how the input was generated (padding + title, a model `Vec`), never by calling the code under test again.
 - Accepted downsides and cases deliberately not handled go in the ADR or the PR description, not in code comments.
 - A flaky test is a bug: fix it, or mark it `#[ignore = "<issue link>"]` with an open issue. Never rerun until green.
 - No performance claim from one wall-clock run on a shared machine: compare equal work, repeat the runs and report the spread.
