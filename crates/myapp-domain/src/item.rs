@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 /// Longest title, in characters.
-pub(crate) const MAX_TITLE_CHARS: usize = 80;
+pub const MAX_TITLE_CHARS: usize = 80;
 
 /// Why a domain rule rejected an input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
