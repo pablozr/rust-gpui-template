@@ -39,7 +39,7 @@ actions!(
 const CONTEXT: &str = "Items";
 
 /// Registers the keyboard shortcuts of the items view.
-pub fn bind_keys(cx: &mut App) {
+pub(crate) fn bind_keys(cx: &mut App) {
     // A focused button activates on Space itself, so the list keys that clash step aside.
     let list = format!("{CONTEXT} && !{BUTTON_CONTEXT}");
     cx.bind_keys([
@@ -54,7 +54,7 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 /// Turns user intent into core calls and renders the resulting state.
-pub struct ItemsView {
+pub(crate) struct ItemsView {
     state: ItemsState,
     store: Arc<dyn ItemStore>,
     focus_handle: FocusHandle,
@@ -65,7 +65,7 @@ pub struct ItemsView {
 
 impl ItemsView {
     /// Creates the view and starts loading the saved items.
-    pub fn new(store: Arc<dyn ItemStore>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(store: Arc<dyn ItemStore>, cx: &mut Context<Self>) -> Self {
         let mut view = Self {
             state: ItemsState::default(),
             store,

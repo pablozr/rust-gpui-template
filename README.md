@@ -31,7 +31,7 @@ tools/check.sh       # Linux and macOS
 
 Both run rustfmt, clippy with `-D warnings` and every test, including the architecture tests.
 
-CI also runs cargo-deny, typos and zizmor (workflow security). A nightly workflow runs cargo-mutants on the domain, core and storage crates; a missed mutant fails it.
+CI also runs cargo-deny, typos and zizmor (workflow security). A nightly workflow runs cargo-mutants (scope in `.cargo/mutants.toml`); a missed mutant fails it.
 
 ## Layout
 

@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// Interface languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum Language {
+pub(crate) enum Language {
     English,
     PortugueseBrazil,
 }
 
 impl Language {
     /// The language for a tag such as `en` or `pt-BR`.
-    pub fn from_tag(tag: &str) -> Option<Self> {
+    pub(crate) fn from_tag(tag: &str) -> Option<Self> {
         match tag {
             "en" => Some(Self::English),
             "pt-BR" | "pt-br" | "pt" => Some(Self::PortugueseBrazil),
@@ -28,12 +28,12 @@ impl Language {
 static CURRENT: AtomicU8 = AtomicU8::new(Language::English as u8);
 
 /// Sets the language in use.
-pub fn set(language: Language) {
+pub(crate) fn set(language: Language) {
     CURRENT.store(language as u8, Ordering::Relaxed);
 }
 
 /// The language in use.
-pub fn current() -> Language {
+pub(crate) fn current() -> Language {
     match CURRENT.load(Ordering::Relaxed) {
         value if value == Language::PortugueseBrazil as u8 => Language::PortugueseBrazil,
         _ => Language::English,
@@ -43,7 +43,7 @@ pub fn current() -> Language {
 macro_rules! strings {
     ($( $name:ident { en: $en:literal, pt_br: $pt_br:literal $(,)? } )*) => {
         $(
-            pub fn $name() -> &'static str {
+            pub(crate) fn $name() -> &'static str {
                 match $crate::i18n::current() {
                     $crate::i18n::Language::English => $en,
                     $crate::i18n::Language::PortugueseBrazil => $pt_br,
@@ -53,14 +53,14 @@ macro_rules! strings {
     };
 }
 
-pub mod app {
+pub(crate) mod app {
     strings! {
         title { en: "MyApp", pt_br: "MyApp" }
         toggle_theme { en: "Toggle theme", pt_br: "Alternar tema" }
     }
 }
 
-pub mod items {
+pub(crate) mod items {
     strings! {
         add_item { en: "Add item", pt_br: "Adicionar item" }
         empty_title { en: "No items yet", pt_br: "Nenhum item ainda" }
@@ -76,7 +76,7 @@ pub mod items {
     }
 
     /// The default title of the `number`-th item.
-    pub fn untitled_item(number: usize) -> String {
+    pub(crate) fn untitled_item(number: usize) -> String {
         match super::current() {
             super::Language::English => format!("Item {number}"),
             super::Language::PortugueseBrazil => format!("Item {number}"),
@@ -84,7 +84,7 @@ pub mod items {
     }
 }
 
-pub mod problems {
+pub(crate) mod problems {
     use myapp_core::Problem;
     use myapp_core::domain::DomainError;
 
@@ -107,7 +107,7 @@ pub mod problems {
     }
 
     /// The message a person reads for a `Problem`.
-    pub fn describe(problem: &Problem) -> &'static str {
+    pub(crate) fn describe(problem: &Problem) -> &'static str {
         match problem {
             Problem::Invalid(DomainError::EmptyTitle) => empty_title(),
             Problem::Invalid(DomainError::TitleTooLong) => title_too_long(),

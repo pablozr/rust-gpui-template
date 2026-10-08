@@ -1,0 +1,8 @@
+# Scope of cargo-mutants (nightly workflow and local `cargo mutants`): the crates without GPUI.
+exclude_globs = [
+    "apps/**",
+    "crates/myapp-ui/**",
+    "tests/**",
+    "crates/myapp-core/src/fake.rs",
+]
+additional_cargo_args = ["--locked"]

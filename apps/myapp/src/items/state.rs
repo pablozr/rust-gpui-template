@@ -6,7 +6,7 @@ use myapp_core::items::{self, Command};
 
 /// What the view shows.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub enum Phase {
+pub(super) enum Phase {
     /// The saved items are being read.
     #[default]
     Loading,
@@ -18,7 +18,7 @@ pub enum Phase {
 
 /// What the view must do after a retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RetryEffect {
+pub(super) enum RetryEffect {
     /// Read the saved items again.
     Load,
     /// Start a save now.
@@ -38,7 +38,7 @@ enum Saving {
 
 /// The list, the selection and the bookkeeping around loading and saving.
 #[derive(Debug, Default)]
-pub struct ItemsState {
+pub(super) struct ItemsState {
     phase: Phase,
     list: ItemList,
     selected: Option<ItemId>,
@@ -51,12 +51,12 @@ pub struct ItemsState {
 
 impl ItemsState {
     /// Goes back to the loading phase.
-    pub fn start_loading(&mut self) {
+    pub(super) fn start_loading(&mut self) {
         self.phase = Phase::Loading;
     }
 
     /// Takes the result of a load: the list on success, the problem otherwise.
-    pub fn finish_loading(&mut self, result: myapp_core::Result<ItemList>) {
+    pub(super) fn finish_loading(&mut self, result: myapp_core::Result<ItemList>) {
         match result {
             Ok(list) => {
                 self.selected = list.items().first().map(Item::id);
@@ -71,7 +71,7 @@ impl ItemsState {
 
     /// Applies a command. Returns whether the list changed; a rejected command leaves a notice.
     /// Nothing changes before the saved items are loaded, or a save would overwrite them.
-    pub fn apply(&mut self, command: Command) -> bool {
+    pub(super) fn apply(&mut self, command: Command) -> bool {
         if self.phase != Phase::Ready {
             return false;
         }
@@ -97,7 +97,7 @@ impl ItemsState {
     }
 
     /// Returns whether a save must start now. During a save it only marks the list as dirty.
-    pub fn request_save(&mut self) -> bool {
+    pub(super) fn request_save(&mut self) -> bool {
         match self.saving {
             Saving::Idle => {
                 self.saving = Saving::InFlight;
@@ -111,7 +111,7 @@ impl ItemsState {
     }
 
     /// Takes the result of a save. Returns whether another save must start now.
-    pub fn finish_saving(&mut self, result: myapp_core::Result<()>) -> bool {
+    pub(super) fn finish_saving(&mut self, result: myapp_core::Result<()>) -> bool {
         self.save_failure = result.err();
         let again = self.saving == Saving::InFlightDirty;
         self.saving = if again {
@@ -123,12 +123,12 @@ impl ItemsState {
     }
 
     /// Whether the latest changes may not be on disk: a save is running or owed, or one failed.
-    pub fn has_unsaved_changes(&self) -> bool {
+    pub(super) fn has_unsaved_changes(&self) -> bool {
         self.saving != Saving::Idle || self.save_failure.is_some()
     }
 
     /// Reacts to a retry request: reload after a failed load, otherwise drop the notice and save.
-    pub fn retry(&mut self) -> RetryEffect {
+    pub(super) fn retry(&mut self) -> RetryEffect {
         match self.phase {
             Phase::LoadFailed(_) => return RetryEffect::Load,
             Phase::Loading => return RetryEffect::Nothing,
@@ -144,13 +144,13 @@ impl ItemsState {
     }
 
     /// Selects the item below the selected one, or the first when nothing is selected.
-    pub fn select_next(&mut self) {
+    pub(super) fn select_next(&mut self) {
         let index = self.selected_index().map_or(0, |index| index + 1);
         self.select_at(index);
     }
 
     /// Selects the item above the selected one, or the first when nothing is selected.
-    pub fn select_previous(&mut self) {
+    pub(super) fn select_previous(&mut self) {
         let index = self
             .selected_index()
             .map_or(0, |index| index.saturating_sub(1));
@@ -158,28 +158,28 @@ impl ItemsState {
     }
 
     /// The selected item.
-    pub fn selected(&self) -> Option<ItemId> {
+    pub(super) fn selected(&self) -> Option<ItemId> {
         self.selected
     }
 
     /// Where the selected item sits in the list.
-    pub fn selected_index(&self) -> Option<usize> {
+    pub(super) fn selected_index(&self) -> Option<usize> {
         self.selected.and_then(|id| self.list.position(id))
     }
 
     /// The list, e.g. to render it or snapshot it for a save.
-    pub fn list(&self) -> &ItemList {
+    pub(super) fn list(&self) -> &ItemList {
         &self.list
     }
 
     /// What the view shows.
-    pub fn phase(&self) -> &Phase {
+    pub(super) fn phase(&self) -> &Phase {
         &self.phase
     }
 
     /// The problem to show next to the list, if any. A failed save comes first: it has an
     /// action and unsaved data depends on it.
-    pub fn notice(&self) -> Option<&Problem> {
+    pub(super) fn notice(&self) -> Option<&Problem> {
         self.save_failure.as_ref().or(self.rejection.as_ref())
     }
 

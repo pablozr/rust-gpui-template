@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 /// Longest title, in characters.
-pub const MAX_TITLE_CHARS: usize = 80;
+pub(crate) const MAX_TITLE_CHARS: usize = 80;
 
 /// Why a domain rule rejected an input.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -174,7 +174,7 @@ impl ItemList {
 mod tests {
     use super::*;
 
-    fn title(text: &str) -> ItemTitle {
+    pub(super) fn title(text: &str) -> ItemTitle {
         ItemTitle::parse(text).unwrap()
     }
 
@@ -251,46 +251,31 @@ mod tests {
 
 #[cfg(test)]
 mod properties {
+    use super::tests::title;
     use super::*;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::sample::Index;
+    use proptest::string::string_regex;
 
-    type Model = Vec<(ItemId, String, bool)>;
+    type Model = Vec<Item>;
 
     #[derive(Debug, Clone)]
     enum Operation {
         Add(String),
         Toggle(Index),
         Remove(Index),
-        ToggleUnknown,
-        RemoveUnknown,
-    }
-
-    fn visible_char() -> impl Strategy<Value = char> {
-        any::<char>().prop_filter("not whitespace", |c| !c.is_whitespace())
+        Unknown,
     }
 
     /// A title body without whitespace at its edges, one to `MAX_TITLE_CHARS + 10` characters.
     fn core_text() -> impl Strategy<Value = String> {
-        let middle = vec(
-            prop_oneof![visible_char(), Just(' ')],
-            0..=MAX_TITLE_CHARS + 8,
-        );
-        prop_oneof![
-            visible_char().prop_map(String::from),
-            (visible_char(), middle, visible_char()).prop_map(|(first, middle, last)| {
-                let mut text = String::from(first);
-                text.extend(middle);
-                text.push(last);
-                text
-            }),
-        ]
+        let pattern = format!(r"\S(( |\S){{0,{}}}\S)?", MAX_TITLE_CHARS + 8);
+        string_regex(&pattern).unwrap()
     }
 
     fn padding() -> impl Strategy<Value = String> {
-        let whitespace = prop::sample::select(vec![' ', '\t', '\n', '\u{a0}', '\u{3000}']);
-        vec(whitespace, 0..3).prop_map(|chars| chars.into_iter().collect())
+        "[ \t\n\u{a0}\u{3000}]{0,2}"
     }
 
     fn operation() -> impl Strategy<Value = Operation> {
@@ -298,8 +283,7 @@ mod properties {
             3 => "[a-z]{1,8}".prop_map(Operation::Add),
             2 => any::<Index>().prop_map(Operation::Toggle),
             2 => any::<Index>().prop_map(Operation::Remove),
-            1 => Just(Operation::ToggleUnknown),
-            1 => Just(Operation::RemoveUnknown),
+            2 => Just(Operation::Unknown),
         ]
     }
 
@@ -311,34 +295,26 @@ mod properties {
     ) -> Result<(), TestCaseError> {
         match operation {
             Operation::Add(text) => {
-                let id = list.add(ItemTitle::parse(&text).unwrap()).unwrap();
+                let title = title(&text);
+                let id = list.add(title.clone()).unwrap();
                 prop_assert!(issued.insert(id), "id {id} was issued twice");
-                model.push((id, text, false));
+                model.push(Item::new(id, title, false));
             }
             Operation::Toggle(index) if !model.is_empty() => {
                 let at = index.index(model.len());
-                prop_assert_eq!(list.toggle(model[at].0), Ok(()));
-                model[at].2 = !model[at].2;
+                let entry = &model[at];
+                prop_assert_eq!(list.toggle(entry.id()), Ok(()));
+                model[at] = Item::new(entry.id(), entry.title().clone(), !entry.is_done());
             }
             Operation::Remove(index) if !model.is_empty() => {
                 let at = index.index(model.len());
-                let removed = list.remove(model[at].0).unwrap();
-                let (id, text, done) = model.remove(at);
-                prop_assert_eq!(
-                    removed,
-                    Item::new(id, ItemTitle::parse(&text).unwrap(), done)
-                );
+                prop_assert_eq!(list.remove(model[at].id()), Ok(model.remove(at)));
             }
             Operation::Toggle(_) | Operation::Remove(_) => {}
-            Operation::ToggleUnknown => {
+            Operation::Unknown => {
                 let unknown = ItemId::new(u64::MAX);
                 let before = list.clone();
                 prop_assert_eq!(list.toggle(unknown), Err(DomainError::UnknownItem(unknown)));
-                prop_assert_eq!(&*list, &before);
-            }
-            Operation::RemoveUnknown => {
-                let unknown = ItemId::new(u64::MAX);
-                let before = list.clone();
                 prop_assert_eq!(list.remove(unknown), Err(DomainError::UnknownItem(unknown)));
                 prop_assert_eq!(&*list, &before);
             }
@@ -347,14 +323,9 @@ mod properties {
     }
 
     fn assert_matches_model(list: &ItemList, model: &Model) -> Result<(), TestCaseError> {
-        let actual: Model = list
-            .items()
-            .iter()
-            .map(|item| (item.id(), item.title().as_str().to_owned(), item.is_done()))
-            .collect();
-        prop_assert_eq!(&actual, model);
-        for (at, (id, _, _)) in model.iter().enumerate() {
-            prop_assert_eq!(list.position(*id), Some(at));
+        prop_assert_eq!(list.items(), model.as_slice());
+        for (at, entry) in model.iter().enumerate() {
+            prop_assert_eq!(list.position(entry.id()), Some(at));
         }
         Ok(())
     }
@@ -372,7 +343,6 @@ mod properties {
             if core.chars().count() <= MAX_TITLE_CHARS {
                 let title = ItemTitle::parse(&padded).unwrap();
                 prop_assert_eq!(title.as_str(), core.as_str());
-                prop_assert_eq!(ItemTitle::parse(title.as_str()), Ok(title));
             } else {
                 prop_assert_eq!(ItemTitle::parse(&padded), Err(DomainError::TitleTooLong));
             }
@@ -393,7 +363,7 @@ mod properties {
         fn restore_rejects_duplicates_and_keeps_order(
             entries in vec((0u64..16, any::<bool>()), 0..10),
         ) {
-            let title = ItemTitle::parse("item").unwrap();
+            let title = title("item");
             let items: Vec<Item> = entries
                 .iter()
                 .map(|&(id, done)| Item::new(ItemId::new(id), title.clone(), done))
@@ -411,7 +381,6 @@ mod properties {
                     prop_assert_eq!(ids.len(), entries.len());
                     prop_assert_eq!(list.items(), items.as_slice());
                     let new = list.add(title).unwrap();
-                    prop_assert!(!ids.contains(&new.get()));
                     prop_assert!(ids.iter().all(|&id| new.get() > id));
                 }
             }

@@ -42,8 +42,8 @@ allow = [
 ]
 
 [bans]
-# Duplicate versions come from GPUI's transitive tree; they are reported, not silenced, so a new
-# duplication elsewhere stays visible.
+# Duplicate versions come from GPUI's transitive tree and from proptest (GPUI's git copy vs
+# crates.io, ADR 0003); they are reported, not silenced, so a new duplication stays visible.
 multiple-versions = "warn"
 wildcards = "deny"
 deny = []

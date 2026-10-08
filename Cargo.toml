@@ -21,7 +21,7 @@ publish = false
 gpui = { git = "https://github.com/zed-industries/zed", rev = "244023605536a412ab6b8d5b658466b89fb15401" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "244023605536a412ab6b8d5b658466b89fb15401", features = ["font-kit", "wayland", "x11"] }
 dirs = "6"
-proptest = "1"
+proptest = { version = "1", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
@@ -38,6 +38,7 @@ missing_debug_implementations = "warn"
 redundant_lifetimes = "warn"
 unused_lifetimes = "warn"
 trivial_numeric_casts = "warn"
+unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 dbg_macro = "deny"
@@ -59,6 +60,9 @@ print_stderr = "warn"
 redundant_clone = "warn"
 implicit_clone = "warn"
 manual_let_else = "warn"
+ref_option = "warn"
+rc_buffer = "warn"
+ignore_without_reason = "warn"
 
 [profile.dev]
 opt-level = 1

@@ -17,7 +17,7 @@ actions!(shell, [ToggleTheme, FocusNext, FocusPrevious, Quit]);
 const CONTEXT: &str = "Shell";
 
 /// Registers the global shortcuts and the quit action.
-pub fn bind_keys(cx: &mut App) {
+pub(crate) fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-shift-t", ToggleTheme, Some(CONTEXT)),
         KeyBinding::new("tab", FocusNext, Some(CONTEXT)),
@@ -28,13 +28,17 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 /// The root view of the main window.
-pub struct Shell {
+pub(crate) struct Shell {
     items: Entity<ItemsView>,
 }
 
 impl Shell {
     /// Creates the items view and gives it the keyboard focus.
-    pub fn new(store: Arc<dyn ItemStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        store: Arc<dyn ItemStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let items = cx.new(|cx| ItemsView::new(store, cx));
         let handle = items.focus_handle(cx);
         window.focus(&handle, cx);
