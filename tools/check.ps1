@@ -32,6 +32,12 @@ if ($Extra) {
     } else {
         Write-Host 'skipped: typos not installed'
     }
+    if (Get-Command zizmor -ErrorAction SilentlyContinue) {
+        zizmor --offline .
+        Assert-Success 'zizmor'
+    } else {
+        Write-Host 'skipped: zizmor not installed'
+    }
 }
 
 exit 0

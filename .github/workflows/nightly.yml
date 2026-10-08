@@ -1,0 +1,37 @@
+name: Nightly
+
+# Mutation testing: cargo-mutants changes the code of the crates without GPUI and checks
+# that a test of the same crate fails. Missed mutants fail the run; details in mutants.out.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  mutants:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
+        with:
+          tool: cargo-mutants
+      - run: >-
+          cargo mutants --package myapp-domain --package myapp-core --package myapp-storage
+          --exclude crates/myapp-core/src/fake.rs --cargo-arg=--locked
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: mutants.out
+          path: mutants.out
+          retention-days: 14
