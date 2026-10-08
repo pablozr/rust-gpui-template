@@ -270,12 +270,12 @@ mod properties {
 
     /// A title body without whitespace at its edges, one to `MAX_TITLE_CHARS + 10` characters.
     fn core_text() -> impl Strategy<Value = String> {
-        let pattern = format!(r"\S(( |\S){{0,{}}}\S)?", MAX_TITLE_CHARS + 8);
+        let pattern = format!(r"\S((\s|\S){{0,{}}}\S)?", MAX_TITLE_CHARS + 8);
         string_regex(&pattern).unwrap()
     }
 
     fn padding() -> impl Strategy<Value = String> {
-        "[ \t\n\u{a0}\u{3000}]{0,2}"
+        "[ \t\n\u{a0}\u{3000}]{0,8}"
     }
 
     fn operation() -> impl Strategy<Value = Operation> {
@@ -371,17 +371,19 @@ mod properties {
             let ids: HashSet<u64> = entries.iter().map(|&(id, _)| id).collect();
             match ItemList::from_items(items.clone()) {
                 Err(error) => {
-                    prop_assert!(ids.len() < entries.len());
-                    let RestoreError::DuplicateItem(id) = error else {
-                        return Err(TestCaseError::fail(format!("unexpected {error:?}")));
-                    };
-                    prop_assert!(entries.iter().filter(|&&(raw, _)| raw == id.get()).count() >= 2);
+                    let mut earlier = HashSet::new();
+                    let first_repeat =
+                        entries.iter().map(|&(id, _)| id).find(|&id| !earlier.insert(id));
+                    prop_assert_eq!(
+                        Some(error),
+                        first_repeat.map(|id| RestoreError::DuplicateItem(ItemId::new(id)))
+                    );
                 }
                 Ok(mut list) => {
                     prop_assert_eq!(ids.len(), entries.len());
                     prop_assert_eq!(list.items(), items.as_slice());
-                    let new = list.add(title).unwrap();
-                    prop_assert!(ids.iter().all(|&id| new.get() > id));
+                    let expected = ids.iter().max().map_or(0, |highest| highest + 1);
+                    prop_assert_eq!(list.add(title), Ok(ItemId::new(expected)));
                 }
             }
         }
