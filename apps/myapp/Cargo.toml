@@ -1,0 +1,40 @@
+[package]
+name = "myapp"
+description = "MyApp desktop application."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+myapp-core = { path = "../../crates/myapp-core" }
+myapp-storage = { path = "../../crates/myapp-storage" }
+myapp-ui = { path = "../../crates/myapp-ui" }
+dirs.workspace = true
+gpui.workspace = true
+gpui_platform.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+myapp-core = { path = "../../crates/myapp-core", features = ["test-support"] }
+
+[package.metadata.packager]
+product-name = "MyApp"
+identifier = "dev.myapp.app"
+description = "MyApp desktop application."
+before-packaging-command = "cargo build --release --locked -p myapp"
+out-dir = "../../target/packages"
+binaries = [{ path = "myapp", main = true }]
+license-file = "../../LICENSE"
+
+[package.metadata.packager.nsis]
+installMode = "currentUser"
+
+[package.metadata.packager.deb]
+depends = ["libxkbcommon-x11-0", "libvulkan1"]

@@ -1,0 +1,57 @@
+# cargo-deny policy. Real vulnerabilities, sources outside crates.io and the pinned GPUI
+# revision, and licenses outside the allow-list fail the build. Unmaintained transitive
+# dependencies of GPUI are noted with a reason instead of being silenced.
+
+[graph]
+targets = [
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+]
+all-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste: proc-macro only, no runtime code; upstream replacement not yet adopted by dependents." },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser/rustybuzz: font shaping inside GPUI, no memory-safety advisory; tracked for upstream skrifa migration." },
+    { id = "RUSTSEC-2026-0206", reason = "transitive GPUI dependency; unmaintained note only, no vulnerability." },
+]
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MPL-2.0",
+    "bzip2-1.0.6",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+# Duplicate versions come from GPUI's transitive tree; they are reported, not silenced, so a new
+# duplication elsewhere stays visible.
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# GPUI is a git dependency pinned to one Zed commit (docs/adr/0001-gpui-pinned-to-zed-rev.md).
+# Its dev-only test support pulls proptest, and the platform layers use zed-industries forks.
+allow-org = { github = ["zed-industries", "proptest-rs"] }

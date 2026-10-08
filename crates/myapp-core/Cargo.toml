@@ -1,0 +1,19 @@
+[package]
+name = "myapp-core"
+description = "Use cases and ports of MyApp."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+test-support = []
+
+[dependencies]
+myapp-domain = { path = "../myapp-domain" }
+thiserror.workspace = true
+tracing.workspace = true
