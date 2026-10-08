@@ -46,6 +46,8 @@ allow = [
 # crates.io, ADR 0003); they are reported, not silenced, so a new duplication stays visible.
 multiple-versions = "warn"
 wildcards = "deny"
+# Workspace crates depend on each other by path; they are unpublished (`publish = false`).
+allow-wildcard-paths = true
 deny = []
 
 [sources]
