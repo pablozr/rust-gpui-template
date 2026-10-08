@@ -37,8 +37,6 @@ pub struct Palette {
     pub danger_soft: Hsla,
     /// Keyboard focus ring.
     pub focus_ring: Hsla,
-    /// No color at all.
-    pub transparent: Hsla,
 }
 
 impl Palette {
@@ -57,7 +55,6 @@ impl Palette {
             danger: tone(0xF87171, 1.0),
             danger_soft: tone(0xF87171, 0.14),
             focus_ring: tone(0xA5B4FC, 1.0),
-            transparent: tone(0x000000, 0.0),
         }
     }
 
@@ -76,7 +73,6 @@ impl Palette {
             danger: tone(0xB91C1C, 1.0),
             danger_soft: tone(0xB91C1C, 0.10),
             focus_ring: tone(0x4F46E5, 1.0),
-            transparent: tone(0x000000, 0.0),
         }
     }
 }
@@ -95,10 +91,6 @@ pub mod space {
     pub const S3: Pixels = px(12.0);
     /// Page and panel padding.
     pub const S4: Pixels = px(16.0);
-    /// Between sections.
-    pub const S5: Pixels = px(24.0);
-    /// Around large empty areas.
-    pub const S6: Pixels = px(32.0);
 }
 
 /// Corner radii.

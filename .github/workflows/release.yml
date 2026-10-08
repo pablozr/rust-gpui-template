@@ -36,8 +36,9 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev \
             libzstd-dev libssl-dev libasound2-dev libfuse2
       - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-packager
-        run: cargo install cargo-packager --locked --version 0.11.8
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-packager@0.11.8
       - name: Build the installers
         working-directory: apps/myapp
         run: cargo packager --release --formats ${{ matrix.formats }}

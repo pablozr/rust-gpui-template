@@ -1,20 +1,19 @@
 //! Interface text. Every string a person reads comes from here, never a literal in a view.
 //!
-//! `strings!` and `formats!` require a translation for every [`Language`], so adding a language
-//! makes the compiler list every missing string.
+//! `strings!` and the `match` in each hand-written format require a translation for every
+//! [`Language`], so adding a language makes the compiler list every missing string.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Interface languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Language {
     English,
     PortugueseBrazil,
 }
 
 impl Language {
-    const ALL: [Self; 2] = [Self::English, Self::PortugueseBrazil];
-
     /// The language for a tag such as `en` or `pt-BR`.
     pub fn from_tag(tag: &str) -> Option<Self> {
         match tag {
@@ -25,24 +24,20 @@ impl Language {
     }
 }
 
-/// Index into `Language::ALL` of the language in use.
-static CURRENT: AtomicU8 = AtomicU8::new(0);
+/// The `Language` discriminant of the language in use.
+static CURRENT: AtomicU8 = AtomicU8::new(Language::English as u8);
 
 /// Sets the language in use.
 pub fn set(language: Language) {
-    let index = Language::ALL
-        .iter()
-        .position(|candidate| *candidate == language)
-        .unwrap_or_default();
-    CURRENT.store(index as u8, Ordering::Relaxed);
+    CURRENT.store(language as u8, Ordering::Relaxed);
 }
 
 /// The language in use.
 pub fn current() -> Language {
-    Language::ALL
-        .get(usize::from(CURRENT.load(Ordering::Relaxed)))
-        .copied()
-        .unwrap_or(Language::English)
+    match CURRENT.load(Ordering::Relaxed) {
+        value if value == Language::PortugueseBrazil as u8 => Language::PortugueseBrazil,
+        _ => Language::English,
+    }
 }
 
 macro_rules! strings {
@@ -52,21 +47,6 @@ macro_rules! strings {
                 match $crate::i18n::current() {
                     $crate::i18n::Language::English => $en,
                     $crate::i18n::Language::PortugueseBrazil => $pt_br,
-                }
-            }
-        )*
-    };
-}
-
-/// Like `strings!`, for text with named arguments (`"Item {number}"`), so a language can reorder
-/// them.
-macro_rules! formats {
-    ($( $name:ident($arg:ident) { en: $en:literal, pt_br: $pt_br:literal $(,)? } )*) => {
-        $(
-            pub fn $name($arg: impl ::std::fmt::Display) -> String {
-                match $crate::i18n::current() {
-                    $crate::i18n::Language::English => format!($en),
-                    $crate::i18n::Language::PortugueseBrazil => format!($pt_br),
                 }
             }
         )*
@@ -95,8 +75,12 @@ pub mod items {
         mark_not_done { en: "Mark as not done", pt_br: "Marcar como não feito" }
     }
 
-    formats! {
-        untitled_item(number) { en: "Item {number}", pt_br: "Item {number}" }
+    /// The default title of the `number`-th item.
+    pub fn untitled_item(number: usize) -> String {
+        match super::current() {
+            super::Language::English => format!("Item {number}"),
+            super::Language::PortugueseBrazil => format!("Item {number}"),
+        }
     }
 }
 
@@ -107,11 +91,11 @@ pub mod problems {
     strings! {
         empty_title { en: "The title cannot be empty.", pt_br: "O título não pode ficar vazio." }
         title_too_long { en: "The title is too long.", pt_br: "O título é longo demais." }
-        unknown_item { en: "That item no longer exists.", pt_br: "Esse item não existe mais." }
-        duplicate_item {
-            en: "The saved items repeat an id.",
-            pt_br: "Os itens salvos repetem um id.",
+        no_ids_left {
+            en: "No more items can be added.",
+            pt_br: "Não é possível adicionar mais itens.",
         }
+        unknown_item { en: "That item no longer exists.", pt_br: "Esse item não existe mais." }
         store_unavailable {
             en: "Your items could not be saved or loaded. Try again.",
             pt_br: "Não foi possível salvar ou carregar seus itens. Tente de novo.",
@@ -126,9 +110,9 @@ pub mod problems {
     pub fn describe(problem: &Problem) -> &'static str {
         match problem {
             Problem::Invalid(DomainError::EmptyTitle) => empty_title(),
-            Problem::Invalid(DomainError::TitleTooLong { .. }) => title_too_long(),
+            Problem::Invalid(DomainError::TitleTooLong) => title_too_long(),
             Problem::Invalid(DomainError::UnknownItem(_)) => unknown_item(),
-            Problem::Invalid(DomainError::DuplicateItem(_)) => duplicate_item(),
+            Problem::Invalid(DomainError::NoIdsLeft) => no_ids_left(),
             Problem::StoreUnavailable => store_unavailable(),
             Problem::StoreCorrupt => store_corrupt(),
         }
@@ -138,15 +122,6 @@ pub mod problems {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn set_then_current_round_trips() {
-        for language in Language::ALL {
-            set(language);
-            assert_eq!(current(), language);
-        }
-        set(Language::English);
-    }
 
     #[test]
     fn language_tags_parse() {

@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    App, Context, Div, FocusHandle, Focusable, KeyBinding, Stateful, Task, UniformListScrollHandle,
-    Window, actions, div, uniform_list,
+    App, Context, Div, FocusHandle, Focusable, KeyBinding, SharedString, Stateful, Task,
+    UniformListScrollHandle, Window, actions, div, uniform_list,
 };
 use myapp_core::ItemStore;
 use myapp_core::Problem;
@@ -18,7 +18,7 @@ use myapp_ui::Theme;
 use myapp_ui::components::{ButtonKind, button, checkbox, empty_state, error_banner, icon_button};
 use myapp_ui::tokens::{radius, size, space, typography};
 use myapp_ui::{Icon, tooltip};
-use state::{ItemsState, Phase};
+use state::{ItemsState, Phase, RetryEffect};
 
 use crate::i18n;
 
@@ -125,7 +125,7 @@ impl ItemsView {
     }
 
     fn add_item(&mut self, _: &AddItem, _window: &mut Window, cx: &mut Context<Self>) {
-        let title = i18n::items::untitled_item(self.state.items().len() + 1);
+        let title = i18n::items::untitled_item(self.state.list().items().len() + 1);
         self.run(Command::Add { title }, cx);
         self.reveal_selection();
     }
@@ -171,27 +171,22 @@ impl ItemsView {
     }
 
     fn retry(&mut self, _: &Retry, _window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.state.phase(), Phase::LoadFailed(_)) {
-            self.load(cx);
-            return;
-        }
-        self.state.clear_notice();
-        if self.state.request_save() {
-            self.save(cx);
+        match self.state.retry() {
+            RetryEffect::Load => self.load(cx),
+            RetryEffect::Save => self.save(cx),
+            RetryEffect::Nothing => {}
         }
         cx.notify();
     }
 
-    fn toolbar(&self, theme: &Theme, cx: &Context<Self>) -> Div {
-        div().flex().items_center().justify_between().child(
-            button(
-                theme,
-                "add-item",
-                i18n::items::add_item(),
-                ButtonKind::Primary,
-            )
-            .on_click(cx.listener(|this, _, window, cx| this.add_item(&AddItem, window, cx))),
+    fn add_button(&self, theme: &Theme, cx: &Context<Self>) -> Stateful<Div> {
+        button(
+            theme,
+            "add-item",
+            i18n::items::add_item(),
+            ButtonKind::Primary,
         )
+        .on_click(cx.listener(|this, _, window, cx| this.add_item(&AddItem, window, cx)))
     }
 
     fn banner(
@@ -221,7 +216,7 @@ impl ItemsView {
             Phase::LoadFailed(problem) => self
                 .banner(theme, problem, "retry-load", cx)
                 .into_any_element(),
-            Phase::Ready if self.state.items().is_empty() => div()
+            Phase::Ready if self.state.list().items().is_empty() => div()
                 .flex()
                 .flex_1()
                 .items_center()
@@ -243,11 +238,12 @@ impl ItemsView {
                 .into_any_element(),
             Phase::Ready => uniform_list(
                 "item-rows",
-                self.state.items().len(),
+                self.state.list().items().len(),
                 cx.processor(|this, range: Range<usize>, _window, cx| {
                     let theme = Theme::of(cx);
                     let selected = this.state.selected();
                     this.state
+                        .list()
                         .items()
                         .get(range)
                         .unwrap_or_default()
@@ -298,7 +294,7 @@ fn row(theme: &Theme, item: &Item, selected: bool, cx: &Context<ItemsView>) -> S
                 .flex_1()
                 .truncate()
                 .text_color(title_color)
-                .child(item.title().as_str().to_owned()),
+                .child(SharedString::from(item.title().to_shared())),
         )
         .child(
             icon_button(theme, ("remove", id.get()), Icon::X)
@@ -334,7 +330,7 @@ impl Render for ItemsView {
             .gap(space::S3)
             .p(space::S4)
             .size_full()
-            .child(self.toolbar(&theme, cx));
+            .child(self.add_button(&theme, cx));
         if let Some(problem) = self.state.notice() {
             root = root.child(self.banner(&theme, problem, "retry-save", cx));
         }
@@ -353,7 +349,7 @@ mod tests {
         store: &Arc<MemoryStore>,
         cx: &'a mut TestAppContext,
     ) -> (Entity<ItemsView>, &'a mut VisualTestContext) {
-        let port: Arc<dyn ItemStore> = Arc::clone(store) as Arc<dyn ItemStore>;
+        let port: Arc<dyn ItemStore> = Arc::<MemoryStore>::clone(store);
         let (view, cx) = cx.add_window_view(|_window, cx| ItemsView::new(port, cx));
         cx.update(|_window, cx| bind_keys(cx));
         let handle = view.read_with(cx, |view, _| view.focus_handle.clone());
@@ -370,7 +366,10 @@ mod tests {
         cx.simulate_keystrokes("secondary-n");
         cx.run_until_parked();
 
-        assert_eq!(view.read_with(cx, |view, _| view.state.items().len()), 1);
+        assert_eq!(
+            view.read_with(cx, |view, _| view.state.list().items().len()),
+            1
+        );
         assert_eq!(store.saved().len(), 1);
     }
 
@@ -383,7 +382,10 @@ mod tests {
         cx.simulate_keystrokes("secondary-n");
         cx.run_until_parked();
 
-        assert_eq!(view.read_with(cx, |view, _| view.state.items().len()), 1);
+        assert_eq!(
+            view.read_with(cx, |view, _| view.state.list().items().len()),
+            1
+        );
         let notice = view.read_with(cx, |view, _| view.state.notice().cloned());
         assert_eq!(notice, Some(Problem::StoreUnavailable));
     }

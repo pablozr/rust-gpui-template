@@ -2,4 +2,4 @@
 
 mod item;
 
-pub use item::{DomainError, Item, ItemId, ItemList, ItemTitle, MAX_TITLE_CHARS};
+pub use item::{DomainError, Item, ItemId, ItemList, ItemTitle, RestoreError};

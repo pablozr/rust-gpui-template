@@ -13,7 +13,7 @@ macro_rules! embedded {
     };
 }
 
-const FILES: &[(&str, &[u8])] = embedded!["icons/check.svg", "icons/plus.svg", "icons/x.svg",];
+const FILES: &[(&str, &[u8])] = embedded!["icons/check.svg", "icons/x.svg",];
 
 /// Serves the embedded files by their path under `assets/`.
 #[derive(Debug)]
@@ -39,8 +39,6 @@ impl AssetSource for Assets {
 /// The icons views can draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-    /// A plus sign.
-    Plus,
     /// A cross.
     X,
     /// A check mark.
@@ -51,7 +49,6 @@ impl Icon {
     /// Where the icon is served, for `svg().path(..)`.
     pub fn path(self) -> &'static str {
         match self {
-            Self::Plus => "icons/plus.svg",
             Self::X => "icons/x.svg",
             Self::Check => "icons/check.svg",
         }
@@ -69,7 +66,7 @@ mod tests {
             assert_eq!(loaded.as_ref(), *bytes);
             assert!(bytes.starts_with(b"<svg"), "{name} is an SVG");
         }
-        for icon in [Icon::Plus, Icon::X, Icon::Check] {
+        for icon in [Icon::X, Icon::Check] {
             assert!(Assets.load(icon.path()).unwrap().is_some(), "{icon:?}");
         }
         assert!(Assets.load("icons/missing.svg").unwrap().is_none());

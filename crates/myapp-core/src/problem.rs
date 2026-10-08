@@ -19,7 +19,7 @@ pub enum Problem {
 }
 
 /// Result of a use case.
-pub type Result<T, E = Problem> = std::result::Result<T, E>;
+pub type Result<T> = std::result::Result<T, Problem>;
 
 impl Problem {
     /// Whether doing the same thing again could succeed.

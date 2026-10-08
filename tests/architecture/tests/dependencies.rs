@@ -1,34 +1,9 @@
-//! Which crates may depend on which, and which external crates each layer may use.
+//! Which crates may depend on which, according to the layer policy table.
 
-use architecture::{Member, members, path_targets, workspace_dependency_names};
+use architecture::{Dependency, members, path_targets, workspace_dependency_names};
 
-/// Workspace crates a member may depend on.
-fn allowed_internal(name: &str) -> &'static [&'static str] {
-    match name {
-        "myapp-domain" | "myapp-ui" | "architecture" => &[],
-        "myapp-core" => &["myapp-domain"],
-        "myapp-storage" => &["myapp-core"],
-        "myapp" => &["myapp-core", "myapp-storage", "myapp-ui"],
-        other => panic!("unknown workspace member `{other}`; register it in tests/architecture"),
-    }
-}
-
-/// External crates a layer may use. The composition root has no list.
-fn allowed_external(name: &str) -> Option<&'static [&'static str]> {
-    match name {
-        "myapp-domain" => Some(&["thiserror"]),
-        "myapp-core" => Some(&["thiserror", "tracing"]),
-        "myapp-storage" => Some(&["serde", "serde_json", "tempfile"]),
-        "myapp-ui" => Some(&["gpui"]),
-        "architecture" => Some(&["toml"]),
-        "myapp" => None,
-        other => panic!("unknown workspace member `{other}`; register it in tests/architecture"),
-    }
-}
-
-fn external_dependencies(member: &Member) -> impl Iterator<Item = &architecture::Dependency> {
-    member
-        .dependencies
+fn external_dependencies(dependencies: &[Dependency]) -> impl Iterator<Item = &Dependency> {
+    dependencies
         .iter()
         .filter(|dependency| dependency.path.is_none())
 }
@@ -41,9 +16,9 @@ fn is_gpui(package: &str) -> bool {
 fn every_member_is_registered_and_uses_only_allowed_workspace_crates() {
     let all = members();
     let mut violations = Vec::new();
-    for member in &all {
-        let allowed = allowed_internal(&member.name);
-        let (targets, unresolved) = path_targets(member, &all);
+    for member in all {
+        let allowed = member.layer().workspace;
+        let (targets, unresolved) = path_targets(member, all);
         for path in unresolved {
             violations.push(format!(
                 "`{}` has path dependency {path} that is not a workspace member",
@@ -60,17 +35,27 @@ fn every_member_is_registered_and_uses_only_allowed_workspace_crates() {
 }
 
 #[test]
-fn inner_layers_use_only_allow_listed_external_crates() {
+fn restricted_layers_use_only_allow_listed_external_crates() {
     let mut violations = Vec::new();
     for member in members() {
-        let Some(allowed) = allowed_external(&member.name) else {
+        let layer = member.layer();
+        let Some(allowed) = layer.external else {
             continue;
         };
-        for dependency in external_dependencies(&member) {
-            if !allowed.contains(&dependency.package.as_str()) {
+        for dependency in external_dependencies(&member.dependencies) {
+            let package = dependency.package.as_str();
+            let listed = allowed.contains(&package)
+                || (dependency.dev && layer.external_dev.contains(&package));
+            if !listed {
+                let kind = if dependency.dev {
+                    "dev-dependency"
+                } else {
+                    "dependency"
+                };
                 violations.push(format!(
-                    "`{}` may not depend on `{}`; allowed: {allowed:?}",
-                    member.name, dependency.package
+                    "`{}` may not use `{package}` as a {kind}; allowed: {allowed:?}, \
+                     dev-only: {:?}",
+                    member.name, layer.external_dev
                 ));
             }
         }
@@ -79,10 +64,10 @@ fn inner_layers_use_only_allow_listed_external_crates() {
 }
 
 #[test]
-fn gpui_is_confined_to_the_app_and_the_ui_kit() {
+fn gpui_is_declared_only_by_layers_that_allow_it() {
     let mut violations = Vec::new();
     for member in members() {
-        if matches!(member.name.as_str(), "myapp" | "myapp-ui") {
+        if member.layer().gpui_allowed {
             continue;
         }
         for dependency in &member.dependencies {
@@ -99,8 +84,8 @@ fn gpui_is_confined_to_the_app_and_the_ui_kit() {
 
 #[test]
 fn every_member_inherits_the_workspace_lints() {
-    let missing: Vec<String> = members()
-        .into_iter()
+    let missing: Vec<&str> = members()
+        .iter()
         .filter(|member| {
             let inherits = member
                 .manifest
@@ -109,7 +94,7 @@ fn every_member_inherits_the_workspace_lints() {
                 .and_then(toml::Value::as_bool);
             inherits != Some(true)
         })
-        .map(|member| member.name)
+        .map(|member| member.name.as_str())
         .collect();
     assert!(
         missing.is_empty(),
@@ -122,7 +107,7 @@ fn external_dependencies_come_from_the_workspace_table() {
     let registered = workspace_dependency_names();
     let mut violations = Vec::new();
     for member in members() {
-        for dependency in external_dependencies(&member) {
+        for dependency in external_dependencies(&member.dependencies) {
             if !dependency.inherits_workspace || !registered.contains(&dependency.key) {
                 violations.push(format!(
                     "`{}` declares `{}` itself; use `workspace = true` and register it under \

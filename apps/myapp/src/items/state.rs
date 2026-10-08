@@ -5,7 +5,7 @@ use myapp_core::domain::{Item, ItemId, ItemList};
 use myapp_core::items::{self, Command};
 
 /// What the view shows.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub enum Phase {
     /// The saved items are being read.
     #[default]
@@ -14,6 +14,17 @@ pub enum Phase {
     Ready,
     /// The saved items could not be read.
     LoadFailed(Problem),
+}
+
+/// What the view must do after a retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetryEffect {
+    /// Read the saved items again.
+    Load,
+    /// Start a save now.
+    Save,
+    /// A save is already running and will pick up the latest list.
+    Nothing,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -105,6 +116,19 @@ impl ItemsState {
         again
     }
 
+    /// Reacts to a retry request: reload after a failed load, otherwise drop the notice and save.
+    pub fn retry(&mut self) -> RetryEffect {
+        if matches!(self.phase, Phase::LoadFailed(_)) {
+            return RetryEffect::Load;
+        }
+        self.notice = None;
+        if self.request_save() {
+            RetryEffect::Save
+        } else {
+            RetryEffect::Nothing
+        }
+    }
+
     /// Selects the item below the selected one, or the first when nothing is selected.
     pub fn select_next(&mut self) {
         let index = self.selected_index().map_or(0, |index| index + 1);
@@ -129,12 +153,7 @@ impl ItemsState {
         self.selected.and_then(|id| self.list.position(id))
     }
 
-    /// The items in display order.
-    pub fn items(&self) -> &[Item] {
-        self.list.items()
-    }
-
-    /// The whole list, e.g. to snapshot it for a save.
+    /// The list, e.g. to render it or snapshot it for a save.
     pub fn list(&self) -> &ItemList {
         &self.list
     }
@@ -147,11 +166,6 @@ impl ItemsState {
     /// The problem to show next to the list, if any.
     pub fn notice(&self) -> Option<&Problem> {
         self.notice.as_ref()
-    }
-
-    /// Hides the current notice.
-    pub fn clear_notice(&mut self) {
-        self.notice = None;
     }
 
     fn select_at(&mut self, index: usize) {
@@ -235,7 +249,21 @@ mod tests {
         let (mut state, _) = ready_with(&["one"]);
         assert!(state.request_save());
         assert!(!state.finish_saving(Err(Problem::StoreUnavailable)));
-        assert_eq!(state.items().len(), 1);
+        assert_eq!(state.list().items().len(), 1);
         assert_eq!(state.notice(), Some(&Problem::StoreUnavailable));
+    }
+
+    #[test]
+    fn retry_reloads_after_a_failed_load_and_saves_after_a_failed_save() {
+        let mut state = ItemsState::default();
+        state.finish_loading(Err(Problem::StoreUnavailable));
+        assert_eq!(state.retry(), RetryEffect::Load);
+
+        let (mut state, _) = ready_with(&["one"]);
+        assert!(state.request_save());
+        assert!(!state.finish_saving(Err(Problem::StoreUnavailable)));
+        assert_eq!(state.retry(), RetryEffect::Save);
+        assert_eq!(state.notice(), None);
+        assert_eq!(state.retry(), RetryEffect::Nothing);
     }
 }

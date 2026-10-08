@@ -31,7 +31,7 @@ fn main() {
         i18n::set(language);
     }
 
-    let items_file = app_dir(dirs::data_dir()).join("items.json");
+    let items_file = app_dir().join("items.json");
     let store: Arc<dyn ItemStore> = Arc::new(JsonFileStore::new(items_file));
 
     application()
@@ -70,8 +70,8 @@ fn main() {
 }
 
 /// `<OS data dir>/myapp`, or the temp dir when the OS has none.
-fn app_dir(base: Option<PathBuf>) -> PathBuf {
-    let base = base.unwrap_or_else(|| {
+fn app_dir() -> PathBuf {
+    let base = dirs::data_dir().unwrap_or_else(|| {
         let fallback = std::env::temp_dir();
         tracing::warn!(?fallback, "no OS data directory; using the temp directory");
         fallback

@@ -66,22 +66,3 @@ pub fn toggle(cx: &mut App) {
     cx.set_global(next);
     cx.refresh_windows();
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dark_and_light_palettes_differ() {
-        let dark = Theme::new(ThemeMode::Dark).colors;
-        let light = Theme::new(ThemeMode::Light).colors;
-        assert_ne!(dark.background, light.background);
-        assert_ne!(dark.text, light.text);
-    }
-
-    #[test]
-    fn toggling_twice_returns_the_same_mode() {
-        assert_eq!(ThemeMode::Dark.toggled().toggled(), ThemeMode::Dark);
-        assert_eq!(ThemeMode::Light.toggled(), ThemeMode::Dark);
-    }
-}

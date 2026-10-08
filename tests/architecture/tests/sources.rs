@@ -1,42 +1,29 @@
-//! Rules about what the source files contain.
+//! Rules about what the source files contain, per the layer policy table.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use architecture::{color_literal_violations, relative_path, rust_sources, workspace_root};
+use architecture::{LAYERS, color_literal_violations, members, sources_of};
 
 const LINE_LIMIT: usize = 600;
 
-/// Every Rust file of the app and the library crates, except this crate.
-fn product_sources() -> Vec<PathBuf> {
-    let root = workspace_root();
-    ["apps", "crates"]
-        .iter()
-        .flat_map(|dir| rust_sources(&root.join(dir)))
-        .collect()
-}
-
-fn read(path: &Path) -> String {
-    fs::read_to_string(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
-}
-
-fn is_under(path: &Path, prefixes: &[&str]) -> bool {
-    let relative = relative_path(path);
-    prefixes.iter().any(|prefix| relative.starts_with(prefix))
-}
+/// The only file allowed to hold raw color values.
+const TOKENS_FILE: &str = "crates/myapp-ui/src/tokens.rs";
 
 #[test]
-fn gpui_is_not_referenced_outside_the_app_and_the_ui_kit() {
-    let needles = ["use gpui", "gpui::", "gpui_platform::"];
+fn gpui_is_not_referenced_by_layers_that_forbid_it() {
+    let needles = [
+        concat!("use ", "gpui"),
+        concat!("gpui", "::"),
+        concat!("gpui_platform", "::"),
+    ];
     let mut violations = Vec::new();
-    for path in product_sources() {
-        if is_under(&path, &["apps/myapp/", "crates/myapp-ui/"]) {
-            continue;
-        }
-        let source = read(&path);
-        for needle in needles {
-            if source.contains(needle) {
-                violations.push(format!("{} references `{needle}`", relative_path(&path)));
+    for member in members()
+        .iter()
+        .filter(|member| !member.layer().gpui_allowed)
+    {
+        for source in sources_of(member) {
+            for needle in needles {
+                if source.text.contains(needle) {
+                    violations.push(format!("{} references `{needle}`", source.relative));
+                }
             }
         }
     }
@@ -44,7 +31,7 @@ fn gpui_is_not_referenced_outside_the_app_and_the_ui_kit() {
 }
 
 #[test]
-fn domain_and_core_do_no_io() {
+fn layers_that_forbid_io_do_none() {
     let tokens = [
         "std::fs",
         "std::net",
@@ -55,21 +42,44 @@ fn domain_and_core_do_no_io() {
         "#[link",
     ];
     let mut violations = Vec::new();
-    for path in product_sources() {
-        if !is_under(
-            &path,
-            &["crates/myapp-domain/src/", "crates/myapp-core/src/"],
-        ) {
-            continue;
+    for member in members().iter().filter(|member| !member.layer().io_allowed) {
+        for source in sources_of(member) {
+            for (index, line) in source.text.lines().enumerate() {
+                for token in tokens {
+                    if line.contains(token) {
+                        violations.push(format!(
+                            "{}:{} uses `{token}`; I/O belongs behind a port",
+                            source.relative,
+                            index + 1
+                        ));
+                    }
+                }
+            }
         }
-        let source = read(&path);
-        for (index, line) in source.lines().enumerate() {
-            for token in tokens {
-                if line.contains(token) {
+    }
+    assert!(violations.is_empty(), "{}", violations.join("\n"));
+}
+
+#[test]
+fn adapters_are_wired_only_in_the_composition_root_main() {
+    let mut violations = Vec::new();
+    for adapter in LAYERS.iter().filter(|layer| layer.is_adapter) {
+        let crate_name = adapter.crate_name();
+        for member in members()
+            .iter()
+            .filter(|member| member.name != adapter.package)
+        {
+            let main = member.dir.join("src").join("main.rs");
+            let is_root = member.layer().external.is_none();
+            for source in sources_of(member) {
+                if is_root && source.path == main {
+                    continue;
+                }
+                if source.text.contains(&crate_name) {
                     violations.push(format!(
-                        "{}:{} uses `{token}`; I/O belongs behind a port",
-                        relative_path(&path),
-                        index + 1
+                        "{} mentions adapter `{crate_name}`; only the composition root's \
+                         main.rs may",
+                        source.relative
                     ));
                 }
             }
@@ -79,32 +89,22 @@ fn domain_and_core_do_no_io() {
 }
 
 #[test]
-fn storage_is_wired_only_in_main() {
-    let mut violations = Vec::new();
-    for path in product_sources() {
-        let relative = relative_path(&path);
-        if relative == "apps/myapp/src/main.rs" || relative.starts_with("crates/myapp-storage/") {
-            continue;
-        }
-        if read(&path).contains("myapp_storage") {
-            violations.push(format!("{relative} mentions `myapp_storage`"));
-        }
-    }
-    assert!(violations.is_empty(), "{}", violations.join("\n"));
-}
-
-#[test]
 fn color_literals_live_only_in_tokens() {
     let mut violations = Vec::new();
-    for path in product_sources() {
-        let relative = relative_path(&path);
-        if relative == "crates/myapp-ui/src/tokens.rs" {
-            continue;
-        }
-        for (line, found) in color_literal_violations(&read(&path)) {
-            violations.push(format!(
-                "{relative}:{line} has a {found}; colors belong in tokens.rs"
-            ));
+    for member in members()
+        .iter()
+        .filter(|member| member.layer().gpui_allowed)
+    {
+        for source in sources_of(member) {
+            if source.relative == TOKENS_FILE {
+                continue;
+            }
+            for (line, found) in color_literal_violations(&source.text) {
+                violations.push(format!(
+                    "{}:{line} has a {found}; colors belong in tokens.rs",
+                    source.relative
+                ));
+            }
         }
     }
     assert!(violations.is_empty(), "{}", violations.join("\n"));
@@ -112,12 +112,11 @@ fn color_literals_live_only_in_tokens() {
 
 #[test]
 fn no_mod_rs_files() {
-    let root = workspace_root();
-    let found: Vec<String> = ["apps", "crates", "tests"]
+    let found: Vec<&str> = members()
         .iter()
-        .flat_map(|dir| rust_sources(&root.join(dir)))
-        .filter(|path| path.file_name().is_some_and(|name| name == "mod.rs"))
-        .map(|path| relative_path(&path))
+        .flat_map(sources_of)
+        .filter(|source| source.path.file_name().is_some_and(|name| name == "mod.rs"))
+        .map(|source| source.relative.as_str())
         .collect();
     assert!(
         found.is_empty(),
@@ -127,17 +126,14 @@ fn no_mod_rs_files() {
 
 #[test]
 fn source_files_stay_under_600_lines() {
-    let root = workspace_root();
     let mut violations = Vec::new();
-    for dir in ["apps", "crates", "tests"] {
-        for path in rust_sources(&root.join(dir)) {
-            let lines = read(&path).lines().count();
-            if lines > LINE_LIMIT {
-                violations.push(format!(
-                    "{} has {lines} lines; split it by responsibility (limit {LINE_LIMIT})",
-                    relative_path(&path)
-                ));
-            }
+    for source in members().iter().flat_map(sources_of) {
+        let lines = source.text.lines().count();
+        if lines > LINE_LIMIT {
+            violations.push(format!(
+                "{} has {lines} lines; split it by responsibility (limit {LINE_LIMIT})",
+                source.relative
+            ));
         }
     }
     assert!(violations.is_empty(), "{}", violations.join("\n"));

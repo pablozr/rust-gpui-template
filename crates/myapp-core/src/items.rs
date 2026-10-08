@@ -36,7 +36,7 @@ pub fn save(store: &dyn ItemStore, list: &ItemList) -> Result<()> {
 /// Applies a command and returns the id of the affected item. The list is unchanged on error.
 pub fn apply(list: &mut ItemList, command: Command) -> Result<ItemId> {
     match command {
-        Command::Add { title } => Ok(list.add(ItemTitle::parse(&title)?)),
+        Command::Add { title } => Ok(list.add(ItemTitle::parse(&title)?)?),
         Command::Toggle(id) => {
             list.toggle(id)?;
             Ok(id)
@@ -68,17 +68,25 @@ mod tests {
         let mut list = ItemList::default();
         let result = apply(&mut list, Command::Add { title: "  ".into() });
         assert_eq!(result, Err(Problem::Invalid(DomainError::EmptyTitle)));
-        assert!(list.is_empty());
+        assert!(list.items().is_empty());
     }
 
     #[test]
     fn store_failure_becomes_a_retryable_problem() {
         let store = MemoryStore::default();
         store.fail_with(Some(Failure::Unavailable));
-        let problem = save(&store, &ItemList::default()).unwrap_err();
+        let mut list = ItemList::default();
+        apply(
+            &mut list,
+            Command::Add {
+                title: "one".into(),
+            },
+        )
+        .unwrap();
+        let problem = save(&store, &list).unwrap_err();
         assert_eq!(problem, Problem::StoreUnavailable);
         assert!(problem.is_retryable());
-        assert_eq!(store.save_count(), 0);
+        assert!(store.saved().is_empty());
     }
 
     #[test]

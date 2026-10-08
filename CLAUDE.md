@@ -10,7 +10,7 @@ For anyone changing this repository, human or agent. Every rule here is somethin
 - Small commits, one topic, Conventional Commits. Code, tests and docs for a change go in the same commit. `Cargo.lock` is committed; checks run with `--locked`.
 
 ## Ask before
-Propose options and a recommendation, then wait, before: adding or replacing a dependency; adding a crate, layer or cross-layer interface; a new pattern (concurrency, errors, state, persistence); bumping the GPUI rev; deviating from an ADR. When approved, add a short ADR (docs/adr/0000-template.md) in the same commit and register new crates in `tests/architecture`.
+Propose options and a recommendation, then wait, before: adding or replacing a dependency; adding a crate, layer or cross-layer interface; a new pattern (concurrency, errors, state, persistence); bumping the GPUI rev; deviating from an ADR. When approved, add a short ADR (docs/adr/0000-template.md) in the same commit and add the new crate's row to the `LAYERS` table in `tests/architecture`.
 
 ## Layers
 - `myapp-domain`: types and rules. No I/O, async, serde or GPUI.
@@ -19,7 +19,7 @@ Propose options and a recommendation, then wait, before: adding or replacing a d
 - `myapp-ui`: tokens, theme, primitives. Knows no business types.
 - `apps/myapp`: composition root and feature views. Views turn user intent into core calls and render state; business rules never live in a view.
 - A feature view keeps its state as plain data in `feature/state.rs`, tested without GPUI.
-- Dependencies point inward; `tests/architecture` enforces edges, GPUI confinement, color literals, file length and no `mod.rs`.
+- Dependencies point inward; `tests/architecture` enforces edges, GPUI confinement, I/O-free layers, adapter wiring, color literals, file length and no `mod.rs`.
 
 ## Rust
 - Errors: a `thiserror` enum per library crate; `anyhow` only in the app binary. Propagate with `?`. The core maps failures to `Problem`; views show `i18n::problems::describe`.

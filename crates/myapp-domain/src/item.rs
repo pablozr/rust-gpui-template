@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 /// Longest title, in characters.
 pub const MAX_TITLE_CHARS: usize = 80;
@@ -13,21 +14,29 @@ pub enum DomainError {
     #[error("the title is empty")]
     EmptyTitle,
     /// The title has more than [`MAX_TITLE_CHARS`] characters.
-    #[error("the title is longer than {max} characters")]
-    TitleTooLong {
-        /// The limit that was exceeded.
-        max: usize,
-    },
+    #[error("the title is longer than {MAX_TITLE_CHARS} characters")]
+    TitleTooLong,
     /// No item has this id.
     #[error("no item with id {0}")]
     UnknownItem(ItemId),
+    /// Every id has been handed out.
+    #[error("no item ids are left")]
+    NoIdsLeft,
+}
+
+/// Why saved items cannot become a list.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RestoreError {
     /// Two items share this id.
     #[error("more than one item with id {0}")]
     DuplicateItem(ItemId),
+    /// The id is the largest possible one, so no id can follow it.
+    #[error("item id {0} leaves no room for new ids")]
+    IdOutOfRange(ItemId),
 }
 
 /// Identifies an item for as long as it exists. Never reused within a list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItemId(u64);
 
 impl ItemId {
@@ -50,7 +59,7 @@ impl fmt::Display for ItemId {
 
 /// A non-blank title of at most [`MAX_TITLE_CHARS`] characters.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ItemTitle(String);
+pub struct ItemTitle(Arc<str>);
 
 impl ItemTitle {
     /// Trims `text` and checks it against the title rules.
@@ -60,16 +69,19 @@ impl ItemTitle {
             return Err(DomainError::EmptyTitle);
         }
         if trimmed.chars().count() > MAX_TITLE_CHARS {
-            return Err(DomainError::TitleTooLong {
-                max: MAX_TITLE_CHARS,
-            });
+            return Err(DomainError::TitleTooLong);
         }
-        Ok(Self(trimmed.to_owned()))
+        Ok(Self(trimmed.into()))
     }
 
     /// The title text.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The title text, shared without copying.
+    pub fn to_shared(&self) -> Arc<str> {
+        Arc::clone(&self.0)
     }
 }
 
@@ -112,27 +124,26 @@ pub struct ItemList {
 
 impl ItemList {
     /// Restores a list, e.g. from storage. New ids continue after the highest one.
-    pub fn from_items(items: Vec<Item>) -> Result<Self, DomainError> {
+    pub fn from_items(items: Vec<Item>) -> Result<Self, RestoreError> {
         let mut seen = HashSet::new();
+        let mut next_id = 0;
         for item in &items {
             if !seen.insert(item.id) {
-                return Err(DomainError::DuplicateItem(item.id));
+                return Err(RestoreError::DuplicateItem(item.id));
             }
+            let after = item.id.get().checked_add(1);
+            next_id = next_id.max(after.ok_or(RestoreError::IdOutOfRange(item.id))?);
         }
-        let next_id = items
-            .iter()
-            .map(|item| item.id.get() + 1)
-            .max()
-            .unwrap_or_default();
         Ok(Self { items, next_id })
     }
 
     /// Appends an undone item and returns its id.
-    pub fn add(&mut self, title: ItemTitle) -> ItemId {
+    pub fn add(&mut self, title: ItemTitle) -> Result<ItemId, DomainError> {
+        let next_id = self.next_id.checked_add(1).ok_or(DomainError::NoIdsLeft)?;
         let id = ItemId::new(self.next_id);
-        self.next_id += 1;
+        self.next_id = next_id;
         self.items.push(Item::new(id, title, false));
-        id
+        Ok(id)
     }
 
     /// Flips the done flag of an item.
@@ -156,16 +167,6 @@ impl ItemList {
     /// Where an item sits in display order.
     pub fn position(&self, id: ItemId) -> Option<usize> {
         self.items.iter().position(|item| item.id == id)
-    }
-
-    /// How many items there are.
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-
-    /// Whether there are no items.
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
     }
 }
 
@@ -192,24 +193,38 @@ mod tests {
         assert!(ItemTitle::parse(&"é".repeat(MAX_TITLE_CHARS)).is_ok());
         assert_eq!(
             ItemTitle::parse(&"é".repeat(MAX_TITLE_CHARS + 1)),
-            Err(DomainError::TitleTooLong {
-                max: MAX_TITLE_CHARS
-            })
+            Err(DomainError::TitleTooLong)
         );
     }
 
     #[test]
     fn ids_continue_after_the_highest_restored_id() {
         let mut list = ItemList::from_items(vec![item(4), item(1)]).unwrap();
-        assert_eq!(list.add(title("next")), ItemId::new(5));
+        assert_eq!(list.add(title("next")), Ok(ItemId::new(5)));
     }
 
     #[test]
     fn restoring_duplicate_ids_fails() {
         assert_eq!(
             ItemList::from_items(vec![item(2), item(2)]),
-            Err(DomainError::DuplicateItem(ItemId::new(2)))
+            Err(RestoreError::DuplicateItem(ItemId::new(2)))
         );
+    }
+
+    #[test]
+    fn restoring_the_largest_possible_id_fails() {
+        assert_eq!(
+            ItemList::from_items(vec![item(u64::MAX)]),
+            Err(RestoreError::IdOutOfRange(ItemId::new(u64::MAX)))
+        );
+    }
+
+    #[test]
+    fn adding_after_the_last_possible_id_fails_without_changing_the_list() {
+        let mut list = ItemList::from_items(vec![item(u64::MAX - 1)]).unwrap();
+        assert_eq!(list.add(title("last")), Err(DomainError::NoIdsLeft));
+        assert_eq!(list.add(title("again")), Err(DomainError::NoIdsLeft));
+        assert_eq!(list.items().len(), 1);
     }
 
     #[test]
@@ -224,9 +239,9 @@ mod tests {
     #[test]
     fn removing_returns_the_item_and_keeps_the_order() {
         let mut list = ItemList::default();
-        let first = list.add(title("first"));
-        let second = list.add(title("second"));
-        let third = list.add(title("third"));
+        let first = list.add(title("first")).unwrap();
+        let second = list.add(title("second")).unwrap();
+        let third = list.add(title("third")).unwrap();
         let removed = list.remove(second).unwrap();
         assert_eq!(removed.title().as_str(), "second");
         let remaining: Vec<ItemId> = list.items().iter().map(Item::id).collect();

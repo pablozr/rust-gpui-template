@@ -1,7 +1,6 @@
 //! An in-memory `ItemStore` for tests.
 
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use myapp_domain::Item;
@@ -17,12 +16,11 @@ pub enum Failure {
     Corrupt,
 }
 
-/// Keeps items in memory and counts the saves it receives.
+/// Keeps items in memory.
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     items: Mutex<Vec<Item>>,
     failure: Mutex<Option<Failure>>,
-    saves: AtomicUsize,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -48,11 +46,6 @@ impl MemoryStore {
         locked(&self.items).clone()
     }
 
-    /// How many saves succeeded.
-    pub fn save_count(&self) -> usize {
-        self.saves.load(Ordering::SeqCst)
-    }
-
     fn check(&self) -> Result<(), StoreError> {
         match *locked(&self.failure) {
             None => Ok(()),
@@ -71,7 +64,6 @@ impl ItemStore for MemoryStore {
     fn save(&self, items: &[Item]) -> Result<(), StoreError> {
         self.check()?;
         *locked(&self.items) = items.to_vec();
-        self.saves.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }

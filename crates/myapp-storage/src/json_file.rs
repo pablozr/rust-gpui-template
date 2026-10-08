@@ -10,24 +10,37 @@ use serde::{Deserialize, Serialize};
 
 const VERSION: u32 = 1;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct StoredFile {
     version: u32,
     items: Vec<StoredItem>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct StoredItem {
     id: u64,
     title: String,
     done: bool,
 }
 
-impl From<&Item> for StoredItem {
-    fn from(item: &Item) -> Self {
+#[derive(Serialize)]
+struct StoredFileRef<'a> {
+    version: u32,
+    items: Vec<StoredItemRef<'a>>,
+}
+
+#[derive(Serialize)]
+struct StoredItemRef<'a> {
+    id: u64,
+    title: &'a str,
+    done: bool,
+}
+
+impl<'a> From<&'a Item> for StoredItemRef<'a> {
+    fn from(item: &'a Item) -> Self {
         Self {
             id: item.id().get(),
-            title: item.title().as_str().to_owned(),
+            title: item.title().as_str(),
             done: item.is_done(),
         }
     }
@@ -74,9 +87,9 @@ impl ItemStore for JsonFileStore {
     }
 
     fn save(&self, items: &[Item]) -> Result<(), StoreError> {
-        let file = StoredFile {
+        let file = StoredFileRef {
             version: VERSION,
-            items: items.iter().map(StoredItem::from).collect(),
+            items: items.iter().map(StoredItemRef::from).collect(),
         };
         let bytes = serde_json::to_vec_pretty(&file)
             .map_err(|error| StoreError::Io(io::Error::other(error)))?;
