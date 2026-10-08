@@ -1,4 +1,4 @@
-//! The window's frame: header, theme switch and global shortcuts.
+//! The window's frame: header, theme switch, focus traversal and global shortcuts.
 
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use myapp_ui::tokens::{size, space, typography};
 use crate::i18n;
 use crate::items::ItemsView;
 
-actions!(shell, [ToggleTheme, Quit]);
+actions!(shell, [ToggleTheme, FocusNext, FocusPrevious, Quit]);
 
 const CONTEXT: &str = "Shell";
 
@@ -20,6 +20,8 @@ const CONTEXT: &str = "Shell";
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-shift-t", ToggleTheme, Some(CONTEXT)),
+        KeyBinding::new("tab", FocusNext, Some(CONTEXT)),
+        KeyBinding::new("shift-tab", FocusPrevious, Some(CONTEXT)),
         KeyBinding::new("secondary-q", Quit, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
@@ -69,6 +71,8 @@ impl Render for Shell {
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|_, _: &ToggleTheme, _window, cx| myapp_ui::theme::toggle(cx)))
+            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
             .flex()
             .flex_col()
             .size_full()
@@ -76,5 +80,29 @@ impl Render for Shell {
             .text_color(theme.colors.text)
             .child(header)
             .child(div().flex_1().min_h_0().child(self.items.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::TestAppContext;
+    use myapp_core::fake::MemoryStore;
+
+    use super::*;
+
+    #[gpui::test]
+    fn tab_moves_the_focus_off_the_list_and_shift_tab_brings_it_back(cx: &mut TestAppContext) {
+        let store: Arc<dyn ItemStore> = Arc::new(MemoryStore::default());
+        let (shell, cx) = cx.add_window_view(|window, cx| Shell::new(store, window, cx));
+        cx.update(|_window, cx| bind_keys(cx));
+        cx.run_until_parked();
+        let list = shell.read_with(cx, |shell, cx| shell.items.focus_handle(cx));
+        assert!(cx.update(|window, _| list.is_focused(window)));
+
+        cx.simulate_keystrokes("tab");
+        assert!(!cx.update(|window, _| list.is_focused(window)));
+
+        cx.simulate_keystrokes("shift-tab");
+        assert!(cx.update(|window, _| list.is_focused(window)));
     }
 }

@@ -54,7 +54,7 @@ Propose options and a recommendation, then wait, before: adding or replacing a d
 - Raw values (colors, sizes, spacing, radii, durations) exist only in `crates/myapp-ui/src/tokens.rs`, for both themes. Views read them through `Theme::of(cx)` and the token modules.
 - Reuse `myapp-ui` primitives; a new pattern goes there, not into a view.
 - Every surface handles loading, empty (saying what fills it), recoverable error (with a real action) and content.
-- Every control is keyboard-focusable with a visible focus ring and has an `aria_label`; icon-only controls also get a tooltip.
+- Every control is reachable with Tab (`tab_index` or `tab_stop`), shows a visible focus ring and has an `aria_label`; icon-only controls also get a tooltip.
 - Every string a person reads comes from `i18n`. A missing translation is a compile error; keep it that way.
 
 ## No slop

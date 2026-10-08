@@ -69,7 +69,7 @@ impl ItemsView {
         let mut view = Self {
             state: ItemsState::default(),
             store,
-            focus_handle: cx.focus_handle(),
+            focus_handle: cx.focus_handle().tab_stop(true),
             scroll: UniformListScrollHandle::new(),
             load_task: None,
             save_task: None,
