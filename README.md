@@ -20,7 +20,7 @@ $env:MYAPP_LANG = 'pt-BR'      # interface language: en or pt-BR
 $env:RUST_LOG = 'myapp=debug'  # log filter
 ```
 
-Shortcuts: `Ctrl/Cmd+N` adds an item, `Space` ticks the selected one, `Delete` removes it, `Up`/`Down` move the selection, `Ctrl/Cmd+Shift+T` switches the theme, `Ctrl/Cmd+Q` quits.
+Shortcuts: `Ctrl/Cmd+N` adds an item, `Space` ticks the selected one, `Delete` removes it, `Up`/`Down` move the selection, `Ctrl/Cmd+R` retries a failed load or save, `Ctrl/Cmd+Shift+T` switches the theme, `Ctrl/Cmd+Q` quits.
 
 ## Checks
 

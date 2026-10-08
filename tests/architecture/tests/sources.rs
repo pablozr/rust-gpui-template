@@ -1,6 +1,6 @@
 //! Rules about what the source files contain, per the layer policy table.
 
-use architecture::{LAYERS, color_literal_violations, members, sources_of};
+use architecture::{LAYERS, color_literal_violations, members, sources_of, std_io_uses};
 
 const LINE_LIMIT: usize = 600;
 
@@ -32,18 +32,16 @@ fn gpui_is_not_referenced_by_layers_that_forbid_it() {
 
 #[test]
 fn layers_that_forbid_io_do_none() {
-    let tokens = [
-        "std::fs",
-        "std::net",
-        "std::process",
-        "std::thread",
-        "std::env",
-        "extern \"C\"",
-        "#[link",
-    ];
+    let tokens = ["extern \"C\"", "#[link"];
     let mut violations = Vec::new();
     for member in members().iter().filter(|member| !member.layer().io_allowed) {
         for source in sources_of(member) {
+            for (line, module) in std_io_uses(&source.text) {
+                violations.push(format!(
+                    "{}:{line} uses `{module}`; I/O belongs behind a port",
+                    source.relative
+                ));
+            }
             for (index, line) in source.text.lines().enumerate() {
                 for token in tokens {
                     if line.contains(token) {
@@ -57,7 +55,14 @@ fn layers_that_forbid_io_do_none() {
             }
         }
     }
-    assert!(violations.is_empty(), "{}", violations.join("\n"));
+    assert!(
+        violations.is_empty(),
+        "{}",
+        violations.join(
+            "
+"
+        )
+    );
 }
 
 #[test]

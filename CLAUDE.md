@@ -46,6 +46,7 @@ Propose options and a recommendation, then wait, before: adding or replacing a d
 - Regions that redraw often (lists, timers) get their own entity.
 - Ids of repeated elements come from domain ids (`("item", id.get())`), never from positions.
 - Long lists use `uniform_list`; inside a flex parent it needs `.flex_1().min_h_0()` or it never scrolls.
+- List shortcuts such as Space bind to `"Items && !Button"`: `myapp-ui` buttons carry the `Button` key context so a focused button keeps its own keyboard activation.
 - Every user action is a GPUI action with a key binding in a key context, registered in the feature's `bind_keys`.
 - Tests: plain-data state first; `#[gpui::test]` with `add_window_view`, `simulate_keystrokes` and `run_until_parked` for actions, focus and async.
 

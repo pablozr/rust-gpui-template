@@ -34,6 +34,7 @@ $replacements = @(
     @('dev.myapp.app', $Identifier),
     @('MYAPP_', ($upper + '_')),
     @('myapp_', ($snake + '_')),
+    @('myapp=', ($snake + '=')),
     @('MyApp', $DisplayName),
     @('myapp', $Name)
 )

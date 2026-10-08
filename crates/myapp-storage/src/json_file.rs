@@ -1,7 +1,8 @@
 //! Items kept in one JSON file.
 
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write as _};
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 use std::{fs, io};
 
 use myapp_core::domain::{Item, ItemId, ItemTitle};
@@ -60,12 +61,17 @@ impl TryFrom<StoredItem> for Item {
 #[derive(Debug)]
 pub struct JsonFileStore {
     path: PathBuf,
+    /// Saves share one temporary file, so they run one at a time.
+    writing: Mutex<()>,
 }
 
 impl JsonFileStore {
     /// A store backed by the file at `path`; the file is created on the first save.
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        Self {
+            path,
+            writing: Mutex::new(()),
+        }
     }
 }
 
@@ -96,9 +102,14 @@ impl ItemStore for JsonFileStore {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let _writing = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
         let temporary = self.path.with_extension("json.tmp");
-        fs::write(&temporary, bytes)?;
-        // rename replaces atomically, so a crash never leaves a half-written file
+        let mut file = fs::File::create(&temporary)?;
+        file.write_all(&bytes)?;
+        // The data must be on disk before the rename, or a crash could leave the new name
+        // pointing at an empty file. The rename itself replaces the old file atomically.
+        file.sync_all()?;
+        drop(file);
         fs::rename(&temporary, &self.path)?;
         Ok(())
     }
@@ -147,5 +158,22 @@ mod tests {
         store.save(&[]).unwrap();
         fs::write(&store.path, br#"{"version": 2, "items": []}"#).unwrap();
         assert!(matches!(store.load(), Err(StoreError::Corrupt(_))));
+    }
+
+    #[test]
+    fn saves_from_several_threads_never_corrupt_the_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = store_in(&directory);
+        std::thread::scope(|scope| {
+            for id in 1..=8 {
+                let store = &store;
+                scope.spawn(move || {
+                    for _ in 0..25 {
+                        store.save(&[item(id, "same", false)]).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(store.load().unwrap().len(), 1);
     }
 }

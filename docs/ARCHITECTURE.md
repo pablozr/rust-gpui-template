@@ -28,7 +28,7 @@ Dependencies point inward: the domain knows nothing, the core knows the domain, 
 2. The handler calls `ItemsState::apply`, which calls `myapp_core::items::apply` on the list.
 3. If the list changed and `request_save` says no save is running, `ItemsView::save` snapshots the list and runs `core::items::save` with `cx.background_spawn`.
 4. The result returns through `this.update(cx, ..)` to `ItemsState::finish_saving`. If the list changed meanwhile, one more save runs with the latest list.
-5. A failure becomes a `Problem`, shown as a banner with a retry button when `is_retryable`.
+5. A failure becomes a `Problem`, shown as a banner with a retry button when `is_retryable`. On quit, `ItemsView` writes whatever is not saved yet (`on_app_quit`).
 
 ## Adding a feature
 

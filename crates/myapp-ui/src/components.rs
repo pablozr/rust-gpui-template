@@ -9,6 +9,10 @@ use gpui::{Div, ElementId, Hsla, SharedString, Stateful, Svg, div, svg};
 use crate::tokens::{self, radius, size, space, typography};
 use crate::{Icon, Theme};
 
+/// Key context of every button-like primitive. Views leave shortcuts such as Space out of it
+/// (`"Items && !Button"`) so a focused button keeps its own keyboard activation.
+pub const BUTTON_CONTEXT: &str = "Button";
+
 /// Visual weight of a [`button`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
@@ -18,7 +22,7 @@ pub enum ButtonKind {
     Ghost,
 }
 
-/// A text button.
+/// A text button, labeled for assistive technology by its own text.
 pub fn button(
     theme: &Theme,
     id: impl Into<ElementId>,
@@ -26,9 +30,12 @@ pub fn button(
     kind: ButtonKind,
 ) -> Stateful<Div> {
     let colors = theme.colors;
+    let label = label.into();
     let base = theme
         .text(div(), typography::BODY)
         .id(id)
+        .key_context(BUTTON_CONTEXT)
+        .aria_label(label.clone())
         .flex()
         .items_center()
         .justify_center()
@@ -38,7 +45,7 @@ pub fn button(
         .tab_index(0)
         .focus_visible(move |style| style.shadow(tokens::focus_ring(colors.focus_ring)))
         .cursor_pointer()
-        .child(label.into());
+        .child(label);
     match kind {
         ButtonKind::Primary => base
             .bg(colors.accent)
@@ -55,6 +62,7 @@ pub fn icon_button(theme: &Theme, id: impl Into<ElementId>, icon_kind: Icon) -> 
     let colors = theme.colors;
     div()
         .id(id)
+        .key_context(BUTTON_CONTEXT)
         .flex()
         .flex_none()
         .items_center()
@@ -73,6 +81,7 @@ pub fn checkbox(theme: &Theme, id: impl Into<ElementId>, checked: bool) -> State
     let colors = theme.colors;
     let base = div()
         .id(id)
+        .key_context(BUTTON_CONTEXT)
         .flex()
         .flex_none()
         .items_center()

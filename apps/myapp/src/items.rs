@@ -15,7 +15,9 @@ use myapp_core::Problem;
 use myapp_core::domain::Item;
 use myapp_core::items::{self as core_items, Command};
 use myapp_ui::Theme;
-use myapp_ui::components::{ButtonKind, button, checkbox, empty_state, error_banner, icon_button};
+use myapp_ui::components::{
+    BUTTON_CONTEXT, ButtonKind, button, checkbox, empty_state, error_banner, icon_button,
+};
 use myapp_ui::tokens::{radius, size, space, typography};
 use myapp_ui::{Icon, tooltip};
 use state::{ItemsState, Phase, RetryEffect};
@@ -38,11 +40,14 @@ const CONTEXT: &str = "Items";
 
 /// Registers the keyboard shortcuts of the items view.
 pub fn bind_keys(cx: &mut App) {
+    // A focused button activates on Space itself, so the list keys that clash step aside.
+    let list = format!("{CONTEXT} && !{BUTTON_CONTEXT}");
     cx.bind_keys([
         KeyBinding::new("secondary-n", AddItem, Some(CONTEXT)),
-        KeyBinding::new("space", ToggleSelected, Some(CONTEXT)),
-        KeyBinding::new("delete", RemoveSelected, Some(CONTEXT)),
-        KeyBinding::new("backspace", RemoveSelected, Some(CONTEXT)),
+        KeyBinding::new("secondary-r", Retry, Some(CONTEXT)),
+        KeyBinding::new("space", ToggleSelected, Some(&list)),
+        KeyBinding::new("delete", RemoveSelected, Some(&list)),
+        KeyBinding::new("backspace", RemoveSelected, Some(&list)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
         KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
     ]);
@@ -70,7 +75,34 @@ impl ItemsView {
             save_task: None,
         };
         view.load(cx);
+        Self::flush_saves_on_quit(cx);
         view
+    }
+
+    /// Makes quitting write the changes that are not on disk yet.
+    fn flush_saves_on_quit(cx: &mut Context<Self>) {
+        cx.on_app_quit(|view, cx| {
+            // Awaiting the running save would wait on the main thread, which quitting blocks.
+            // Dropping it cancels it unless it is mid-write; the store serializes the writes.
+            view.save_task = None;
+            let unsaved = view
+                .state
+                .has_unsaved_changes()
+                .then(|| (Arc::clone(&view.store), view.state.list().clone()));
+            let executor = cx.background_executor().clone();
+            async move {
+                let Some((store, snapshot)) = unsaved else {
+                    return;
+                };
+                let saved = executor
+                    .spawn(async move { core_items::save(store.as_ref(), &snapshot) })
+                    .await;
+                if let Err(problem) = saved {
+                    tracing::error!(%problem, "the last changes could not be saved on quit");
+                }
+            }
+        })
+        .detach();
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
@@ -329,8 +361,10 @@ impl Render for ItemsView {
             .flex_col()
             .gap(space::S3)
             .p(space::S4)
-            .size_full()
-            .child(self.add_button(&theme, cx));
+            .size_full();
+        if matches!(self.state.phase(), Phase::Ready) {
+            root = root.child(self.add_button(&theme, cx));
+        }
         if let Some(problem) = self.state.notice() {
             root = root.child(self.banner(&theme, problem, "retry-save", cx));
         }
@@ -340,7 +374,8 @@ impl Render for ItemsView {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Entity, TestAppContext, VisualTestContext};
+    use gpui::{Entity, InputEvent as _, KeyUpEvent, Keystroke, TestAppContext, VisualTestContext};
+    use myapp_core::domain::{ItemId, ItemTitle};
     use myapp_core::fake::{Failure, MemoryStore};
 
     use super::*;
@@ -388,5 +423,105 @@ mod tests {
         );
         let notice = view.read_with(cx, |view, _| view.state.notice().cloned());
         assert_eq!(notice, Some(Problem::StoreUnavailable));
+    }
+
+    fn saved_item(id: u64, title: &str) -> Item {
+        Item::new(ItemId::new(id), ItemTitle::parse(title).unwrap(), false)
+    }
+
+    fn done_flags(view: &Entity<ItemsView>, cx: &mut VisualTestContext) -> Vec<bool> {
+        view.read_with(cx, |view, _| {
+            view.state
+                .list()
+                .items()
+                .iter()
+                .map(Item::is_done)
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn space_on_a_focused_checkbox_toggles_its_row_not_the_selected_one(cx: &mut TestAppContext) {
+        let store = Arc::new(MemoryStore::with_items(vec![
+            saved_item(1, "one"),
+            saved_item(2, "two"),
+        ]));
+        let (view, cx) = open(&store, cx);
+        cx.simulate_keystrokes("down");
+        assert_eq!(done_flags(&view, cx), [false, false]);
+
+        // Tab stops in order: the add button, then the first row's checkbox.
+        cx.update(|window, cx| {
+            window.focus_next(cx);
+            window.focus_next(cx);
+        });
+        let on_button = cx.update(|window, _| {
+            window
+                .context_stack()
+                .last()
+                .is_some_and(|context| context.contains(BUTTON_CONTEXT))
+        });
+        assert!(on_button, "a button should hold the focus");
+        // A focused element only handles keys after it has been painted as focused.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes("space");
+        cx.update(|window, cx| {
+            let release = KeyUpEvent {
+                keystroke: Keystroke::parse("space").unwrap(),
+            };
+            window.dispatch_event(release.to_platform_input(), cx);
+        });
+
+        assert_eq!(done_flags(&view, cx), [true, false]);
+    }
+
+    #[gpui::test]
+    fn space_on_the_list_toggles_the_selected_item(cx: &mut TestAppContext) {
+        let store = Arc::new(MemoryStore::with_items(vec![saved_item(1, "one")]));
+        let (view, cx) = open(&store, cx);
+
+        cx.simulate_keystrokes("space");
+
+        assert_eq!(done_flags(&view, cx), [true]);
+    }
+
+    #[gpui::test]
+    fn commands_before_the_load_finishes_are_ignored(cx: &mut TestAppContext) {
+        let store = Arc::new(MemoryStore::with_items(vec![saved_item(1, "one")]));
+        let port: Arc<dyn ItemStore> = Arc::<MemoryStore>::clone(&store);
+        let (view, cx) = cx.add_window_view(|_window, cx| {
+            let mut view = ItemsView::new(port, cx);
+            view.run(
+                Command::Add {
+                    title: "new".into(),
+                },
+                cx,
+            );
+            view
+        });
+        cx.run_until_parked();
+
+        assert_eq!(done_flags(&view, cx).len(), 1);
+        assert_eq!(store.saved().len(), 1);
+    }
+
+    #[gpui::test]
+    fn quitting_saves_what_changed_during_the_running_save(cx: &mut TestAppContext) {
+        let store = Arc::new(MemoryStore::default());
+        let (view, cx) = open(&store, cx);
+
+        view.update(cx, |view, cx| {
+            for title in ["one", "two"] {
+                view.run(
+                    Command::Add {
+                        title: title.into(),
+                    },
+                    cx,
+                );
+            }
+        });
+        cx.cx.update(|cx| cx.shutdown());
+
+        assert_eq!(store.saved().len(), 2);
     }
 }

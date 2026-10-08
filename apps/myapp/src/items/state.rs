@@ -42,7 +42,10 @@ pub struct ItemsState {
     phase: Phase,
     list: ItemList,
     selected: Option<ItemId>,
-    notice: Option<Problem>,
+    /// The last save failed, so the latest changes are not on disk. Only a save clears it.
+    save_failure: Option<Problem>,
+    /// The last command was refused.
+    rejection: Option<Problem>,
     saving: Saving,
 }
 
@@ -58,7 +61,8 @@ impl ItemsState {
             Ok(list) => {
                 self.selected = list.items().first().map(Item::id);
                 self.list = list;
-                self.notice = None;
+                self.save_failure = None;
+                self.rejection = None;
                 self.phase = Phase::Ready;
             }
             Err(problem) => self.phase = Phase::LoadFailed(problem),
@@ -66,14 +70,18 @@ impl ItemsState {
     }
 
     /// Applies a command. Returns whether the list changed; a rejected command leaves a notice.
+    /// Nothing changes before the saved items are loaded, or a save would overwrite them.
     pub fn apply(&mut self, command: Command) -> bool {
+        if self.phase != Phase::Ready {
+            return false;
+        }
         let removed_at = match command {
             Command::Remove(id) => self.list.position(id),
             Command::Add { .. } | Command::Toggle(_) => None,
         };
         match items::apply(&mut self.list, command) {
             Ok(id) => {
-                self.notice = None;
+                self.rejection = None;
                 self.selected = match removed_at {
                     Some(index) if self.selected == Some(id) => self.neighbor_at(index),
                     Some(_) => self.selected,
@@ -82,7 +90,7 @@ impl ItemsState {
                 true
             }
             Err(problem) => {
-                self.notice = Some(problem);
+                self.rejection = Some(problem);
                 false
             }
         }
@@ -104,9 +112,7 @@ impl ItemsState {
 
     /// Takes the result of a save. Returns whether another save must start now.
     pub fn finish_saving(&mut self, result: myapp_core::Result<()>) -> bool {
-        if let Err(problem) = result {
-            self.notice = Some(problem);
-        }
+        self.save_failure = result.err();
         let again = self.saving == Saving::InFlightDirty;
         self.saving = if again {
             Saving::InFlight
@@ -116,12 +122,20 @@ impl ItemsState {
         again
     }
 
+    /// Whether the latest changes may not be on disk: a save is running or owed, or one failed.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.saving != Saving::Idle || self.save_failure.is_some()
+    }
+
     /// Reacts to a retry request: reload after a failed load, otherwise drop the notice and save.
     pub fn retry(&mut self) -> RetryEffect {
-        if matches!(self.phase, Phase::LoadFailed(_)) {
-            return RetryEffect::Load;
+        match self.phase {
+            Phase::LoadFailed(_) => return RetryEffect::Load,
+            Phase::Loading => return RetryEffect::Nothing,
+            Phase::Ready => {}
         }
-        self.notice = None;
+        self.save_failure = None;
+        self.rejection = None;
         if self.request_save() {
             RetryEffect::Save
         } else {
@@ -163,9 +177,10 @@ impl ItemsState {
         &self.phase
     }
 
-    /// The problem to show next to the list, if any.
+    /// The problem to show next to the list, if any. A failed save comes first: it has an
+    /// action and unsaved data depends on it.
     pub fn notice(&self) -> Option<&Problem> {
-        self.notice.as_ref()
+        self.save_failure.as_ref().or(self.rejection.as_ref())
     }
 
     fn select_at(&mut self, index: usize) {
@@ -265,5 +280,72 @@ mod tests {
         assert_eq!(state.retry(), RetryEffect::Save);
         assert_eq!(state.notice(), None);
         assert_eq!(state.retry(), RetryEffect::Nothing);
+    }
+
+    #[test]
+    fn commands_are_ignored_until_the_items_are_loaded() {
+        let mut state = ItemsState::default();
+        let add = || Command::Add {
+            title: "one".into(),
+        };
+        assert!(!state.apply(add()));
+        assert!(state.list().items().is_empty());
+        assert_eq!(state.selected(), None);
+
+        state.finish_loading(Err(Problem::StoreCorrupt));
+        assert!(!state.apply(add()));
+        assert!(state.list().items().is_empty());
+        assert_eq!(state.retry(), RetryEffect::Load);
+    }
+
+    #[test]
+    fn retry_while_loading_does_not_save() {
+        let mut state = ItemsState::default();
+        assert_eq!(state.retry(), RetryEffect::Nothing);
+        assert!(state.request_save());
+    }
+
+    #[test]
+    fn a_later_successful_save_clears_the_save_failure() {
+        let (mut state, _) = ready_with(&["one"]);
+        assert!(state.request_save());
+        assert!(!state.request_save());
+        assert!(state.finish_saving(Err(Problem::StoreUnavailable)));
+        assert_eq!(state.notice(), Some(&Problem::StoreUnavailable));
+        assert!(!state.finish_saving(Ok(())));
+        assert_eq!(state.notice(), None);
+    }
+
+    #[test]
+    fn a_rejected_command_keeps_the_save_failure_visible() {
+        let (mut state, _) = ready_with(&["one"]);
+        assert!(state.request_save());
+        assert!(!state.finish_saving(Err(Problem::StoreUnavailable)));
+        assert!(!state.apply(Command::Add { title: " ".into() }));
+        assert_eq!(state.notice(), Some(&Problem::StoreUnavailable));
+        assert_eq!(state.retry(), RetryEffect::Save);
+        assert_eq!(state.notice(), None);
+    }
+
+    #[test]
+    fn a_rejected_command_shows_its_problem_until_the_next_command_works() {
+        let (mut state, _) = ready_with(&["one"]);
+        assert!(!state.apply(Command::Add { title: " ".into() }));
+        assert!(matches!(state.notice(), Some(Problem::Invalid(_))));
+        add(&mut state, "two");
+        assert_eq!(state.notice(), None);
+    }
+
+    #[test]
+    fn changes_are_unsaved_while_a_save_runs_and_after_one_fails() {
+        let (mut state, _) = ready_with(&["one"]);
+        assert!(!state.has_unsaved_changes());
+        assert!(state.request_save());
+        assert!(state.has_unsaved_changes());
+        assert!(!state.finish_saving(Err(Problem::StoreUnavailable)));
+        assert!(state.has_unsaved_changes());
+        assert!(state.request_save());
+        assert!(!state.finish_saving(Ok(())));
+        assert!(!state.has_unsaved_changes());
     }
 }

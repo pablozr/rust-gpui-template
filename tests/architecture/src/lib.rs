@@ -401,6 +401,58 @@ fn find_hex_color(line: &str) -> Option<&str> {
     })
 }
 
+/// Standard library modules that reach outside the process.
+const IO_MODULES: [&str; 5] = ["fs", "net", "process", "thread", "env"];
+
+/// Lines of `source` (1-based) that name an I/O module of `std`, in a path (`std::fs::read`) or
+/// in a group (`use std::{fs, io};`), with the module found.
+pub fn std_io_uses(source: &str) -> Vec<(usize, String)> {
+    let mut found = Vec::new();
+    for (at, _) in source.match_indices("std::") {
+        let glued = source[..at]
+            .chars()
+            .next_back()
+            .is_some_and(|before| before.is_alphanumeric() || before == '_');
+        if glued {
+            continue;
+        }
+        let line = source[..at].matches('\n').count() + 1;
+        for module in std_segments(&source[at + "std::".len()..]) {
+            if IO_MODULES.contains(&module) {
+                found.push((line, format!("std::{module}")));
+            }
+        }
+    }
+    found
+}
+
+/// The first path segment after `std::`: one, or one per top-level entry of a `{...}` group.
+fn std_segments(rest: &str) -> Vec<&str> {
+    let Some(group) = rest.strip_prefix('{') else {
+        return vec![leading_identifier(rest)];
+    };
+    let mut segments = vec![leading_identifier(group)];
+    let mut depth = 0;
+    for (at, character) in group.char_indices() {
+        match character {
+            '{' => depth += 1,
+            '}' if depth == 0 => break,
+            '}' => depth -= 1,
+            ',' if depth == 0 => segments.push(leading_identifier(&group[at + 1..])),
+            _ => {}
+        }
+    }
+    segments
+}
+
+fn leading_identifier(text: &str) -> &str {
+    let text = text.trim_start();
+    let end = text
+        .find(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .unwrap_or(text.len());
+    &text[..end]
+}
+
 /// Counts numeric literals (integers or floats) in `text`.
 fn count_numeric_literals(text: &str) -> usize {
     let mut count = 0;
@@ -475,5 +527,53 @@ unix-only = "1"
             1
         );
         assert_eq!(color_literal_violations("#[derive(Debug)]").len(), 0);
+    }
+
+    #[test]
+    fn io_detector_sees_paths_and_grouped_imports() {
+        let modules = |source: &str| -> Vec<String> {
+            std_io_uses(source)
+                .into_iter()
+                .map(|(_, module)| module)
+                .collect()
+        };
+        assert_eq!(modules("use std::{fs, io};"), ["std::fs"]);
+        assert_eq!(modules("use std::{io, fs as _};"), ["std::fs"]);
+        assert_eq!(
+            modules(
+                "use std::{
+    io,
+    net::{TcpStream},
+};"
+            ),
+            ["std::net"]
+        );
+        assert_eq!(
+            modules("use std::{io::{self, Write}, env, fmt};"),
+            ["std::env"]
+        );
+        assert_eq!(modules("use std::fs::File;"), ["std::fs"]);
+        assert_eq!(modules("std::net::TcpStream::connect(addr)"), ["std::net"]);
+        assert_eq!(modules("let n = ::std::thread::spawn(f);"), ["std::thread"]);
+        assert_eq!(
+            std_io_uses(
+                "use a;
+use std::process;"
+            ),
+            [(2, "std::process".to_owned())]
+        );
+    }
+
+    #[test]
+    fn io_detector_ignores_pure_std_and_lookalikes() {
+        for harmless in [
+            "use std::fmt;",
+            "use std::{fmt, io, sync::Arc};",
+            "use std::io::Write;",
+            "my_std::fs::read(path)",
+            "use std::filesystem_like;",
+        ] {
+            assert!(std_io_uses(harmless).is_empty(), "{harmless}");
+        }
     }
 }
