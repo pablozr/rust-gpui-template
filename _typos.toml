@@ -3,4 +3,4 @@ extend-exclude = ["Cargo.lock", "*.svg"]
 
 [default]
 # Translations are checked by reviewers, not by an English dictionary.
-extend-ignore-re = ['pt_br: "[^"]*"']
+extend-ignore-re = ['pt_br:\s*"(?:[^"\\]|\\.)*"']
